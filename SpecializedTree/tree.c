@@ -22,7 +22,7 @@ int sptree_init(struct sptree_root *root, unsigned long start, size_t length)
 	root->root->start = start;
 	root->root->length = length;
 
-	pr_info("created range: start: %016lx, length: %016lx\n", start, length);
+	pr_info("created range: start: %lx, length: %lx\n", start, length);
 
 	return 0;
 }
@@ -185,7 +185,6 @@ extern void sptree_iter_next(struct sptree_iterator *iter)
 					iter->state = ITER_RIGHT;
 					break;
 				}
-
 			}
 
 		case ITER_LEFT:
@@ -218,9 +217,10 @@ extern void sptree_iter_next(struct sptree_iterator *iter)
 		}
 	}
 }
+// TODO: ce se intampla cu parcurgerea arborelui daca suntem pe un nod care tocmai isi
+// schimba parintele dreapta-stanga sau invers (la o rotatie) ??!!
 
 
-// TODO: change variable names as on wikipedia 
 
 // root = the node that is parent of this subtree, that is replaced with its left child
 // proot = pointer to this node (root->root / parent->left / parent->right)
@@ -271,6 +271,16 @@ static struct sptree_node *rotate_right(struct sptree_node *root, struct sptree_
 		pivot->right->parent = new_root;
 	if (root->right)
 		root->right->parent = new_root;
+
+	// fix balance factors
+	if (pivot->balancing == 0) {
+		new_pivot->balancing = 1;
+		new_root->balancing = -1;
+	}
+	else {
+		new_root->balancing = 0;
+		new_pivot->balancing = 0;
+	}
 
 	// free old nodes
 	kfree_rcu(root, rcu);
@@ -330,6 +340,16 @@ static struct sptree_node *rotate_left(struct sptree_node *root, struct sptree_n
 	if (pivot->right)
 		pivot->right->parent = new_pivot;
 
+	// fix balance factors
+	if (pivot->balancing == 0) {
+		new_pivot->balancing = 1;
+		new_root->balancing = -1;
+	}
+	else {
+		new_root->balancing = 0;
+		new_pivot->balancing = 0;
+	}
+
 	// free old nodes
 	kfree_rcu(root, rcu);
 	kfree_rcu(pivot, rcu);
@@ -338,6 +358,108 @@ static struct sptree_node *rotate_left(struct sptree_node *root, struct sptree_n
 
 	return new_pivot;
 }
+
+static struct sptree_node *rotate_right_left(struct sptree_node *root, struct sptree_node **proot)
+{
+	// root = X
+	struct sptree_node *right = root->right;	// Z
+	struct sptree_node **pright = &root->right;
+	struct sptree_node *left = right->left;		// Y
+	struct sptree_node *new_root;
+	struct sptree_node *new_left;			// new X
+	struct sptree_node *new_right;			// new Z
+
+	pr_info("%s: rotate right-left at %lx\n", __func__, root->start);
+
+	// rotate right on Z
+	if (!rotate_right(right, pright))
+		return NULL;
+
+	// rotate left on X
+	new_root = rotate_left(root, proot);
+	if (!new_root)
+		return NULL;
+
+	new_left = new_root->left;
+	new_right = new_root->right;
+
+	// fix balance factors
+	if (left->balancing > 0) {
+		new_left->balancing = -1;
+		new_right->balancing = 0;
+	}
+	else {
+		if (left->balancing == 0) {
+			new_left->balancing = 0;
+			new_right->balancing = 0;
+		}
+		else
+		{
+			new_left->balancing = 0;
+			new_right->balancing = 1;
+		}
+	}
+
+	new_root->balancing = 0;
+
+	return new_root;
+}
+
+static struct sptree_node *rotate_left_right(struct sptree_node *root, struct sptree_node **proot)
+{
+	// root = X
+	struct sptree_node *left = root->left;		// Z
+	struct sptree_node **pleft = &root->left;
+	struct sptree_node *right = left->right;	// Y
+	struct sptree_node *new_root;
+	struct sptree_node *new_left;			// new Z
+	struct sptree_node *new_right;			// new X
+
+	pr_info("%s: rotate left-right at %lx\n", __func__, root->start);
+
+	// rotate left on Z
+	if (!rotate_left(left, pleft))
+		return NULL;
+
+	// rotate right on X
+	new_root = rotate_right(root, proot);
+	if (!new_root)
+		return NULL;
+
+	new_left = new_root->left;
+	new_right = new_root->right;
+
+	// fix balance factors
+	if (right->balancing > 0) {
+		new_right->balancing = -1;
+		new_left->balancing = 0;
+	}
+	else
+	{
+		if (right->balancing == 0) {
+			new_right->balancing = 0;
+			new_left->balancing = 0;
+		}
+		else
+		{
+			new_right->balancing = 0;
+			new_left->balancing = 1;
+		}
+	}
+
+	new_root->balancing = 0;
+
+	return new_root;
+}
+
+// TODO: the compound rotations are made up of simple rotations, but affect the
+// balance factors in different ways
+// TODO: separate the rotations from the balance factors fixing
+
+// TODO: if one of the simple rotations fails in a compound rotation, the tree is
+// left in an unbalanced state
+// TODO: better implement this in a allocate-replace fashion and try to roll back
+// the changes to the tree in case of failure
 
 struct sptree_node **get_pnode(struct sptree_root *root, struct sptree_node *node)
 {
@@ -362,13 +484,13 @@ int sptree_ror(struct sptree_root *root, unsigned long addr)
 
 	target = search(root, addr);
 	if (!target) {
-		pr_err("couldn't find subtree rooted at %016lx\n", addr);
+		pr_err("couldn't find subtree rooted at %lx\n", addr);
 		return -ENOENT;
 	}
 
 	// validate the node
 	if (!target->mapping) {
-		pr_err("found node (%016lx, %016lx), not a mapping\n", target->start, target->length);
+		pr_err("found node (%lx, %lx), not a mapping\n", target->start, target->length);
 		return -EINVAL;
 	}
 	if (!target->left) {
@@ -402,12 +524,12 @@ int sptree_rol(struct sptree_root *root, unsigned long addr)
 
 	target = search(root, addr);
 	if (!target) {
-		pr_err("couldn't find subtree rooted at %016lx\n", addr);
+		pr_err("couldn't find subtree rooted at %lx\n", addr);
 		return -ENOENT;
 	}
 
 	if (!target->mapping) {
-		pr_err("found node (%016lx, %016lx), not a mapping\n", target->start, target->length);
+		pr_err("found node (%lx, %lx), not a mapping\n", target->start, target->length);
 		return -EINVAL;
 	}
 	if (!target->right) {
@@ -429,18 +551,28 @@ int sptree_rol(struct sptree_root *root, unsigned long addr)
 	return 0;
 }
 
-
-
-int retrace(struct sptree_node *node)
+static int retrace(struct sptree_root *root, struct sptree_node *node)
 {
 	struct sptree_node *parent;
+	struct sptree_node **pparent;
+	struct sptree_node *result;
+
+	pr_info("%s: starting at %lx\n", __func__, node->start);
 
 	for (parent = node->parent; parent != NULL; node = parent, parent = node->parent) {
+		pr_info("%s: loop on parent at %lx\n", __func__, parent->start);
+
 		if (is_left_child(node)) {
 			// parent is left-heavy
 			if (parent->balancing < 0) {
-				// TODO: rotations on parent
+				pparent = get_pnode(root, parent);
+				if (node->balancing > 0)
+					result = rotate_left_right(parent, pparent);
+				else
+					result = rotate_right(parent, pparent);
 
+				if (!result)
+					return -ENOMEM;
 			}
 			// parent is right-heavy
 			else if (parent->balancing > 0) {
@@ -453,11 +585,17 @@ int retrace(struct sptree_node *node)
 			}
 		}
 		// right child
-		else {	
+		else {
 			// parent is right heavy
 			if (parent->balancing > 0) {
-				// TODO: rotations on parent
+				pparent = get_pnode(root, parent);
+				if (node->balancing < 0)
+					result = rotate_right_left(parent, pparent);
+				else
+					result = rotate_left(parent, pparent);
 
+				if (!result)
+					return -ENOMEM;
 			}
 			// parent is left-heavy
 			else if (parent->balancing < 0) {
@@ -471,9 +609,9 @@ int retrace(struct sptree_node *node)
 		}
 	}
 
+	// TODO: also analyze return value of rotations and return errors
 	return 0;
 }
-
 
 // create a subtree centered on addr
 // return the subtree or NULL
@@ -482,6 +620,9 @@ static struct sptree_node *insert_alloc_subtree(struct sptree_node *target, unsi
 	struct sptree_node *subtree_root = NULL;
 	struct sptree_node *subtree_left = NULL;
 	struct sptree_node *subtree_rite = NULL;
+
+	pr_info("%s: splitting %lx-%lx at %lx\n", __func__,
+		target->start, target->start + target->length, addr);
 
 	// this will be the mapping
 	subtree_root = kzalloc(sizeof(*subtree_root), GFP_ATOMIC);
@@ -565,6 +706,9 @@ int sptree_insert(struct sptree_root *root, unsigned long addr)
 	subtree->parent = target->parent;
 	ptarget = get_pnode(root, target);
 	*ptarget = subtree;
+
+	// rebalance tree
+	retrace(root, subtree);
 
 	// finally free the replaced node
 	kfree_rcu(target, rcu);

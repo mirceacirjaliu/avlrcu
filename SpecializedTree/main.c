@@ -51,39 +51,47 @@ static void validate_greater(struct sptree_root *root)
 	}
 
 	rcu_read_unlock();
-	
+
 	if (result)
 		pr_err("%s: invalid order detected\n", __func__);
 }
 
-static int validate_nodes(struct sptree_node *node)
+static void validate_nodes(struct sptree_root *root)
 {
-	// a node can't be a freerange
-	if ((node->left || node->right) && !node->mapping)
-		return -EINVAL;
+	struct sptree_iterator iter;
+	int result = 0;
 
-	return 0;
+	rcu_read_lock();
+
+	sptree_for_each_node(&iter, root) {
+		struct sptree_node *node = iter.node;
+
+		// a node can't be a segment
+		if (!node->mapping && (node->left || node->right)) {
+			result = -EINVAL;
+			break;
+		}
+	}
+
+	rcu_read_unlock();
+
+	if (result)
+		pr_err("%s: invalid node detected\n", __func__);
 }
 
 static int validator_func(void *arg)
 {
-	int result;
-
 	pr_info("validator started\n");
 
 	do {
 		// validate each element is greater than the last
 		validate_greater(&range);
-		
+
 		// a leaf is part of the initial range (or whole if no mappings)
 		// otherwise a node (has children) is a mapping
 		// a leaf can also be a mapping if surrounded by other mappings
 		// a node can't be a free-range
-		result = inorder_walk(&range, validate_nodes);
-		if (result) {
-			pr_err("invalid node detected");
-			return -EINVAL;
-		}
+		validate_nodes(&range);
 
 		msleep_interruptible(100);
 
@@ -103,28 +111,28 @@ static ssize_t insert_map(struct file *file, const char __user *data, size_t cou
 	if (IS_ERR_VALUE((long)result))
 		return result;
 
+	pr_info("%s: at %lx\n", __func__, value);
+
 	// check if alligned to page
 	if (value & ~PAGE_MASK) {
-		pr_err("Non-aligned value: %016lx\n", value);
+		pr_err("%s: non-aligned value: %lx\n", __func__, value);
 		return -EINVAL;
 	}
 
 	// check if inside the range
 	if (value < range.start || value > range.start + range.length - PAGE_SIZE) {
-		pr_err("Outside range: %016lx-%016lx\n", range.start, range.start + range.length);
+		pr_err("%s: outside range: %lx-%lx\n", __func__, range.start, range.start + range.length);
 		return -EINVAL;
 	}
-
-	pr_info("Inserting mapping at: %016lx\n", value);
 
 	spin_lock(&lock);
 	result = sptree_insert(&range, value);
 	spin_unlock(&lock);
 
 	if (result == 0)
-		pr_info("Success\n");
+		pr_info("%s: success\n", __func__);
 	else
-		pr_err("Failed: %d\n", result);
+		pr_err("%s: failed: %d\n", __func__, result);
 
 	*offs += count;
 	return count;
@@ -139,24 +147,29 @@ static ssize_t delete_map(struct file *file, const char __user *data, size_t cou
 	if (IS_ERR_VALUE((long)result))
 		return result;
 
+	pr_info("%s: at %lx\n", __func__, value);
+
 	// check if alligned to page
 	if (value & ~PAGE_MASK) {
-		pr_err("Non-aligned value: %016lx\n", value);
+		pr_err("%s: non-aligned value: %lx\n", __func__, value);
 		return -EINVAL;
 	}
 
 	// check if inside the range
 	if (value < range.start || value > range.start + range.length - PAGE_SIZE) {
-		pr_err("Outside range: %016lx-%016lx\n", range.start, range.start + range.length);
+		pr_err("%s: outside range: %lx-%lx\n", __func__, range.start, range.start + range.length);
 		return -EINVAL;
 	}
-
-	pr_info("Deleting mapping at: %016lx\n", value);
 
 	spin_lock(&lock);
 	// TODO: delete node
 	// ...
 	spin_unlock(&lock);
+
+	if (result == 0)
+		pr_info("%s: success\n", __func__);
+	else
+		pr_err("%s: failed: %d\n", __func__, result);
 
 	*offs += count;
 	return count;
@@ -171,9 +184,17 @@ static ssize_t ror_map(struct file *file, const char __user *data, size_t count,
 	if (IS_ERR_VALUE((long)result))
 		return result;
 
+	pr_info("%s: at %lx\n", __func__, value);
+
 	// check if alligned to page
 	if (value & ~PAGE_MASK) {
-		pr_err("Non-aligned value: %016lx\n", value);
+		pr_err("%s: non-aligned value: %lx\n", __func__, value);
+		return -EINVAL;
+	}
+
+	// check if inside the range
+	if (value < range.start || value > range.start + range.length - PAGE_SIZE) {
+		pr_err("%s: outside range: %lx-%lx\n", __func__, range.start, range.start + range.length);
 		return -EINVAL;
 	}
 
@@ -182,9 +203,9 @@ static ssize_t ror_map(struct file *file, const char __user *data, size_t count,
 	spin_unlock(&lock);
 
 	if (result == 0)
-		pr_info("Success\n");
+		pr_info("%s: success\n", __func__);
 	else
-		pr_err("Failed: %d\n", result);
+		pr_err("%s: failed: %d\n", __func__, result);
 
 	*offs += count;
 	return count;
@@ -199,9 +220,17 @@ static ssize_t rol_map(struct file *file, const char __user *data, size_t count,
 	if (IS_ERR_VALUE((long)result))
 		return result;
 
+	pr_info("%s: at %lx\n", __func__, value);
+
 	// check if alligned to page
 	if (value & ~PAGE_MASK) {
-		pr_err("Non-aligned value: %016lx\n", value);
+		pr_err("%s: non-aligned value: %lx\n", __func__, value);
+		return -EINVAL;
+	}
+
+	// check if inside the range
+	if (value < range.start || value > range.start + range.length - PAGE_SIZE) {
+		pr_err("%s: outside range: %lx-%lx\n", __func__, range.start, range.start + range.length);
 		return -EINVAL;
 	}
 
@@ -210,9 +239,9 @@ static ssize_t rol_map(struct file *file, const char __user *data, size_t count,
 	spin_unlock(&lock);
 
 	if (result == 0)
-		pr_info("Success\n");
+		pr_info("%s: success\n", __func__);
 	else
-		pr_err("Failed: %d\n", result);
+		pr_err("%s: failed: %d\n", __func__, result);
 
 	*offs += count;
 	return count;
@@ -256,16 +285,16 @@ static int dump_show(struct seq_file *s, void *v)
 	struct sptree_node *left = node->left;
 	struct sptree_node *right = node->right;
 
-	seq_printf(s, "\tn%016lx [label=\"S=%lx\\nL=%lx\\n%d\", style=filled, fillcolor=%s]\n",
+	seq_printf(s, "\tn%lx [label=\"S=%lx\\nL=%lx\\n%d\", style=filled, fillcolor=%s]\n",
 		(unsigned long)node, node->start, node->length, node->balancing,
 		node->mapping ? "red" : "green");
 
 	if (left)
-		seq_printf(s, "\tn%016lx -> n%016lx [tailport=w]\n",
+		seq_printf(s, "\tn%lx -> n%lx [tailport=w]\n",
 		(unsigned long)node, (unsigned long)left);
 
 	if (right)
-		seq_printf(s, "\tn%016lx -> n%016lx [tailport=e]\n",
+		seq_printf(s, "\tn%lx -> n%lx [tailport=e]\n",
 		(unsigned long)node, (unsigned long)right);
 
 	return 0;
