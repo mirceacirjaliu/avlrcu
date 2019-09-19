@@ -6,6 +6,7 @@
 #include <linux/string.h>
 #include <linux/slab.h>
 #include <linux/rcupdate.h>
+#include <linux/compiler.h>
 
 #include "tree.h"
 
@@ -22,7 +23,7 @@ int sptree_init(struct sptree_root *root, unsigned long start, size_t length)
 	root->root->start = start;
 	root->root->length = length;
 
-	pr_info("created range: start: %lx, length: %lx\n", start, length);
+	pr_info("%s: created root "NODE_FMT"\n", __func__, NODE_ARG(root->root));
 
 	return 0;
 }
@@ -110,7 +111,7 @@ static struct sptree_node *search(struct sptree_root *root, unsigned long addr)
 	if (crnt == NULL)
 		pr_info("%s: found nothing\n", __func__);
 	else
-		pr_info("%s: found node staring at %lx\n", __func__, crnt->start);
+		pr_info("%s: found inside "NODE_FMT"\n", __func__, NODE_ARG(crnt));
 
 	return crnt;
 }
@@ -142,85 +143,64 @@ extern void sptree_iter_first(struct sptree_root *root, struct sptree_iterator *
 	sptree_iter_next(iter);
 }
 
-// TODO: functia asta s-ar putea sa fie vulnerabila la schimbari in tree daca
-// se citesc de mai multe ori aceiasi pointeri (si se schimba intre citiri)
-// nu mai e compatibila RCU
 extern void sptree_iter_next(struct sptree_iterator *iter)
 {
-	while (true) {
+	struct sptree_node *next;
 
+	// INFO: left/right pointers of a node are overwritten by
+	// WRITE_ONCE(*pnode, pointer) so they must be READ_ONCE()
+
+	while (iter->node) {
 		switch (iter->state) {
-		case ITER_UP:
-			// comes from parent
-			if (iter->node->left) {
-				// goes down left subtree
-				iter->node = iter->node->left;
-				iter->state = ITER_UP;
-				break;
-			} else {
-				// no left subtree, will handle the node
-				iter->state = ITER_HANDLED;
+		case ITER_UP:					// comes from parent...
+			next = READ_ONCE(iter->node->left);	// goes down left subtree
+			if (next)
+				iter->node = next;		// state stays the same
+			else {
+				iter->state = ITER_HANDLED;	// no left subtree, will handle the node
 				return;
 			}
+			break;
 
-		case ITER_HANDLED:
-			// node has just been handled
-			if (iter->node->right) {
-				// goes down right subtree
-				iter->node = iter->node->right;
+		case ITER_HANDLED:				// node has just been handled...
+			next = READ_ONCE(iter->node->right);	// goes down right subtree
+			if (next) {
+				iter->node = next;
 				iter->state = ITER_UP;
-				break;
 			} else {
-				// no right subtree, must go up
-				if (is_root(iter->node)) {
-					iter->node = NULL;
-					iter->state = ITER_DONE;
-					return;
-				} else if (is_left_child(iter->node)) {
-					iter->node = iter->node->parent;
-					iter->state = ITER_LEFT;
-					break;
-				} else {
-					iter->node = iter->node->parent;
-					iter->state = ITER_RIGHT;
-					break;
-				}
+				goto back_to_parent;		// no right subtree, must go up
 			}
+			break;
 
-		case ITER_LEFT:
-			// comes from the left subtree
-			iter->state = ITER_HANDLED;
+		// TODO: this state can be optimized with the 2nd branch in ITER_RIGHT
+		case ITER_LEFT:					// comes from the left subtree
+			iter->state = ITER_HANDLED;		// will handle the node
 			return;
 
-		case ITER_RIGHT:
-			// comes from the right subtree, must go up
-			if (is_root(iter->node)) {
-				iter->node = NULL;
+		case ITER_RIGHT:				// comes from right subtree
+back_to_parent:
+			next = READ_ONCE(iter->node->parent);	// may contain L/R flags
+			iter->node = strip_flag(next);		// goes up anyway
+
+			if (is_root(next)) {
 				iter->state = ITER_DONE;
 				return;
 			}
-			else if (is_left_child(iter->node)) {
-				iter->node = iter->node->parent;
+			else if (is_left_child(next)) {
 				iter->state = ITER_LEFT;
-				break;
 			}
 			else {
-				iter->node = iter->node->parent;
 				iter->state = ITER_RIGHT;
-				break;
 			}
-			// TODO: same sequence as above
+			break;
 
-		case ITER_DONE:
 		default:
+			pr_warn("%s: unhandled iterator state\n", __func__);
+			iter->node = NULL;			// cancels iteration
 			return;
 		}
 	}
 }
-// TODO: ce se intampla cu parcurgerea arborelui daca suntem pe un nod care tocmai isi
-// schimba parintele dreapta-stanga sau invers (la o rotatie) ??!!
-
-
 
 // root = the node that is parent of this subtree, that is replaced with its left child
 // proot = pointer to this node (root->root / parent->left / parent->right)
@@ -230,7 +210,11 @@ static struct sptree_node *rotate_right(struct sptree_node *root, struct sptree_
 	struct sptree_node *new_pivot;
 	struct sptree_node *new_root;
 
-	pr_info("%s: rotate right at %lx, pivot at %lx\n", __func__, root->start, pivot->start);
+	// TODO: these 2 variables change roles, rename them accordingly
+
+	pr_info("%s: rotate right at %lx-%lx, pivot at %lx-%lx\n", __func__,
+		root->start, root->start + root->length,
+		pivot->start, pivot->start + pivot->length);
 
 	BUG_ON(*proot != root);
 	BUG_ON(!root->mapping);
@@ -255,22 +239,22 @@ static struct sptree_node *rotate_right(struct sptree_node *root, struct sptree_
 	// link direct pointers
 	new_pivot->left = pivot->left;
 	new_pivot->right = new_root;
-	new_pivot->parent = root->parent;	// this will point to parent of subtree
+	new_pivot->parent = root->parent;	// may contail L/R flags or NULL
 
-	new_root->parent = new_pivot;
+	new_root->parent = make_right(new_pivot);
 	new_root->left = pivot->right;
 	new_root->right = root->right;
 
 	// link root (of subtree)
-	*proot = new_pivot;
+	WRITE_ONCE(*proot, new_pivot);
 
 	// link parent pointers
 	if (pivot->left)
-		pivot->left->parent = new_pivot;
+		WRITE_ONCE(pivot->left->parent, make_left(new_pivot));
 	if (pivot->right)
-		pivot->right->parent = new_root;
+		WRITE_ONCE(pivot->right->parent, make_left(new_root));
 	if (root->right)
-		root->right->parent = new_root;
+		WRITE_ONCE(root->right->parent, make_right(new_root));
 
 	// fix balance factors
 	if (pivot->balancing == 0) {
@@ -286,7 +270,7 @@ static struct sptree_node *rotate_right(struct sptree_node *root, struct sptree_
 	kfree_rcu(root, rcu);
 	kfree_rcu(pivot, rcu);
 
-	pr_info("%s: rotated right, new root is %lx\n", __func__, new_pivot->start);
+	pr_info("%s: rotated right, new root is "NODE_FMT"\n", __func__, NODE_ARG(new_pivot));
 
 	return new_pivot;
 }
@@ -298,7 +282,11 @@ static struct sptree_node *rotate_left(struct sptree_node *root, struct sptree_n
 	struct sptree_node *new_pivot;
 	struct sptree_node *new_root;
 
-	pr_info("%s: rotate left at %lx, pivot at %lx\n", __func__, root->start, pivot->start);
+	// TODO: these 2 variables change roles, rename them accordingly
+
+	pr_info("%s: rotate left at %lx-%lx, pivot at %lx-%lx\n", __func__,
+		root->start, root->start + root->length,
+		pivot->start, pivot->start + pivot->length);
 
 	BUG_ON(*proot != root);
 	BUG_ON(!root->mapping);
@@ -320,25 +308,25 @@ static struct sptree_node *rotate_left(struct sptree_node *root, struct sptree_n
 	memcpy(new_pivot, pivot, sizeof(struct sptree_node));
 	memcpy(new_root, root, sizeof(struct sptree_node));
 
-	// link direct pointers
+	// link direct pointers to new nodes
 	new_pivot->left = new_root;
 	new_pivot->right = pivot->right;
-	new_pivot->parent = root->parent;	// this will point to parent of subtree
+	new_pivot->parent = root->parent;	// may contail L/R flags
 
-	new_root->parent = new_pivot;
+	new_root->parent = make_left(new_pivot);
 	new_root->left = root->left;
 	new_root->right = pivot->left;
 
 	// link root (of subtree)
-	*proot = new_pivot;
+	WRITE_ONCE(*proot, new_pivot);
 
 	// link parent pointers
 	if (root->left)
-		root->left->parent = new_root;
+		WRITE_ONCE(root->left->parent, make_left(new_root));
 	if (pivot->left)
-		pivot->left->parent = new_root;
+		WRITE_ONCE(pivot->left->parent, make_right(new_root));
 	if (pivot->right)
-		pivot->right->parent = new_pivot;
+		WRITE_ONCE(pivot->right->parent, make_right(new_pivot));
 
 	// fix balance factors
 	if (pivot->balancing == 0) {
@@ -354,7 +342,8 @@ static struct sptree_node *rotate_left(struct sptree_node *root, struct sptree_n
 	kfree_rcu(root, rcu);
 	kfree_rcu(pivot, rcu);
 
-	pr_info("%s: rotated left, new root is %lx\n", __func__, new_pivot->start);
+	pr_info("%s: rotated left, new root is "NODE_FMT"\n",
+		__func__, NODE_ARG(new_pivot));
 
 	return new_pivot;
 }
@@ -369,7 +358,8 @@ static struct sptree_node *rotate_right_left(struct sptree_node *root, struct sp
 	struct sptree_node *new_left;			// new X
 	struct sptree_node *new_right;			// new Z
 
-	pr_info("%s: rotate right-left at %lx\n", __func__, root->start);
+	pr_info("%s: rotate right-left at %lx-%lx\n", __func__,
+		root->start, root->start + root->length);
 
 	// rotate right on Z
 	if (!rotate_right(right, pright))
@@ -402,6 +392,9 @@ static struct sptree_node *rotate_right_left(struct sptree_node *root, struct sp
 
 	new_root->balancing = 0;
 
+	pr_info("%s: rotated right-left, new root is "NODE_FMT"\n",
+		__func__, NODE_ARG(new_root));
+
 	return new_root;
 }
 
@@ -415,7 +408,8 @@ static struct sptree_node *rotate_left_right(struct sptree_node *root, struct sp
 	struct sptree_node *new_left;			// new Z
 	struct sptree_node *new_right;			// new X
 
-	pr_info("%s: rotate left-right at %lx\n", __func__, root->start);
+	pr_info("%s: rotate left-right at %lx-%lx\n", __func__,
+		root->start, root->start + root->length);
 
 	// rotate left on Z
 	if (!rotate_left(left, pleft))
@@ -449,6 +443,9 @@ static struct sptree_node *rotate_left_right(struct sptree_node *root, struct sp
 
 	new_root->balancing = 0;
 
+	pr_info("%s: rotated left-right, new root is "NODE_FMT"\n",
+		__func__, NODE_ARG(new_root));
+
 	return new_root;
 }
 
@@ -461,20 +458,11 @@ static struct sptree_node *rotate_left_right(struct sptree_node *root, struct sp
 // TODO: better implement this in a allocate-replace fashion and try to roll back
 // the changes to the tree in case of failure
 
-struct sptree_node **get_pnode(struct sptree_root *root, struct sptree_node *node)
-{
-	if (is_root(node))
-		return &root->root;
-
-	if (is_left_child(node))
-		return &node->parent->left;
-	else
-		return &node->parent->right;
-}
 
 int sptree_ror(struct sptree_root *root, unsigned long addr)
 {
-	struct sptree_node *target, **ptarget;
+	struct sptree_node *target, *parent;
+	struct sptree_node **ptarget;
 	struct sptree_node *subtree;
 
 	if (addr & ~PAGE_MASK)
@@ -502,7 +490,10 @@ int sptree_ror(struct sptree_root *root, unsigned long addr)
 		return -EINVAL;
 	}
 
-	ptarget = get_pnode(root, target);
+	// may contain L/R flags or NULL
+	parent = READ_ONCE(target->parent);
+	ptarget = get_pnode(root, parent);
+
 	subtree = rotate_right(target, ptarget);
 	if (!subtree) {
 		pr_err("no mem?\n");
@@ -514,7 +505,8 @@ int sptree_ror(struct sptree_root *root, unsigned long addr)
 
 int sptree_rol(struct sptree_root *root, unsigned long addr)
 {
-	struct sptree_node *target, **ptarget;
+	struct sptree_node *target, *parent;
+	struct sptree_node **ptarget;
 	struct sptree_node *subtree;
 
 	if (addr & ~PAGE_MASK)
@@ -541,7 +533,10 @@ int sptree_rol(struct sptree_root *root, unsigned long addr)
 		return -EINVAL;
 	}
 
-	ptarget = get_pnode(root, target);
+	// may contain L/R flags or NULL
+	parent = READ_ONCE(target->parent);
+	ptarget = get_pnode(root, parent);
+
 	subtree = rotate_left(target, ptarget);
 	if (!subtree) {
 		pr_err("no mem?\n");
@@ -553,26 +548,39 @@ int sptree_rol(struct sptree_root *root, unsigned long addr)
 
 static int retrace(struct sptree_root *root, struct sptree_node *node)
 {
-	struct sptree_node *parent;
+	struct sptree_node *parent, *gparent;
 	struct sptree_node **pparent;
-	struct sptree_node *result;
 
-	pr_info("%s: starting at %lx\n", __func__, node->start);
+	pr_info("%s: starting at "NODE_FMT"\n", __func__, NODE_ARG(node));
 
-	for (parent = node->parent; parent != NULL; node = parent, parent = node->parent) {
-		pr_info("%s: loop on parent at %lx\n", __func__, parent->start);
+	for (parent = READ_ONCE(node->parent); parent != NULL; node = parent, parent = READ_ONCE(node->parent)) {
 
-		if (is_left_child(node)) {
+		// parent pointer may contain left/right flag
+		pr_info("%s: loop on parent "NODE_FMT", node is "NODE_FMT"\n", __func__,
+			NODE_ARG(strip_flag(parent)), NODE_ARG(node));
+
+		// may contain L/R flags or NULL
+		gparent = READ_ONCE(strip_flag(parent)->parent);
+		pparent = get_pnode(root, gparent);
+
+		if (is_left_child(parent)) {			// node is left child of parent
+			// fix parent pointer
+			parent = strip_flag(parent);
+
+			pr_info("%s: node "NODE_FMT" is left child of "NODE_FMT"\n", __func__,
+				NODE_ARG(node), NODE_ARG(parent));
+
 			// parent is left-heavy
 			if (parent->balancing < 0) {
-				pparent = get_pnode(root, parent);
+				// node is right-heavy
 				if (node->balancing > 0)
-					result = rotate_left_right(parent, pparent);
+					parent = rotate_left_right(parent, pparent);
 				else
-					result = rotate_right(parent, pparent);
+					parent = rotate_right(parent, pparent);
 
-				if (!result)
+				if (!parent)
 					return -ENOMEM;
+				break;
 			}
 			// parent is right-heavy
 			else if (parent->balancing > 0) {
@@ -584,18 +592,24 @@ static int retrace(struct sptree_root *root, struct sptree_node *node)
 				parent->balancing = -1;
 			}
 		}
-		// right child
-		else {
+		else {						// node is right child of parent
+			// fix parent pointer
+			parent = strip_flag(parent);
+
+			pr_info("%s: node "NODE_FMT" is right child of "NODE_FMT"\n", __func__,
+				NODE_ARG(node), NODE_ARG(parent));
+
 			// parent is right heavy
 			if (parent->balancing > 0) {
-				pparent = get_pnode(root, parent);
+				// node is left-heavy
 				if (node->balancing < 0)
-					result = rotate_right_left(parent, pparent);
+					parent = rotate_right_left(parent, pparent);
 				else
-					result = rotate_left(parent, pparent);
+					parent = rotate_left(parent, pparent);
 
-				if (!result)
+				if (!parent)
 					return -ENOMEM;
+				break;
 			}
 			// parent is left-heavy
 			else if (parent->balancing < 0) {
@@ -609,7 +623,6 @@ static int retrace(struct sptree_root *root, struct sptree_node *node)
 		}
 	}
 
-	// TODO: also analyze return value of rotations and return errors
 	return 0;
 }
 
@@ -621,8 +634,7 @@ static struct sptree_node *insert_alloc_subtree(struct sptree_node *target, unsi
 	struct sptree_node *subtree_left = NULL;
 	struct sptree_node *subtree_rite = NULL;
 
-	pr_info("%s: splitting %lx-%lx at %lx\n", __func__,
-		target->start, target->start + target->length, addr);
+	pr_info("%s: splitting "NODE_FMT" at %lx\n", __func__, NODE_ARG(target), addr);
 
 	// this will be the mapping
 	subtree_root = kzalloc(sizeof(*subtree_root), GFP_ATOMIC);
@@ -642,10 +654,11 @@ static struct sptree_node *insert_alloc_subtree(struct sptree_node *target, unsi
 		subtree_left->start = target->start;
 		subtree_left->length = addr - target->start;
 
-		subtree_root->left = subtree_left;
-		subtree_left->parent = subtree_root;
-
 		subtree_root->balancing -= 1;
+		subtree_root->left = subtree_left;
+		subtree_left->parent = make_left(subtree_root);
+
+		pr_info("%s: to the left we have "NODE_FMT"\n", __func__, NODE_ARG(subtree_left));
 	}
 
 	// last page in range
@@ -657,10 +670,11 @@ static struct sptree_node *insert_alloc_subtree(struct sptree_node *target, unsi
 		subtree_rite->start = addr + PAGE_SIZE;
 		subtree_rite->length = target->length - (addr - target->start + PAGE_SIZE);
 
-		subtree_root->right = subtree_rite;
-		subtree_rite->parent = subtree_root;
-
 		subtree_root->balancing += 1;
+		subtree_root->right = subtree_rite;
+		subtree_rite->parent = make_right(subtree_root);
+
+		pr_info("%s: to the right we have "NODE_FMT"\n", __func__, NODE_ARG(subtree_rite));
 	}
 
 	return subtree_root;
@@ -675,11 +689,14 @@ error:
 
 	return NULL;
 }
+// TODO: should I make sure the subtree is all linked up before returning ?
+// TODO: a barrier or something ??
 
 // replaces a leaf node with a subtree, increasing the local depth with 1
 int sptree_insert(struct sptree_root *root, unsigned long addr)
 {
-	struct sptree_node *target, **ptarget;
+	struct sptree_node *target, *parent;
+	struct sptree_node **ptarget;
 	struct sptree_node *subtree;
 
 	if (addr & ~PAGE_MASK)
@@ -702,10 +719,13 @@ int sptree_insert(struct sptree_root *root, unsigned long addr)
 	if (!subtree)
 		return -ENOMEM;
 
+	// may contain L/R flags or NULL
+	parent = READ_ONCE(target->parent);
+	ptarget = get_pnode(root, parent);
+
 	// reverse, then direct link
-	subtree->parent = target->parent;
-	ptarget = get_pnode(root, target);
-	*ptarget = subtree;
+	WRITE_ONCE(subtree->parent, parent);
+	WRITE_ONCE(*ptarget, subtree);
 
 	// rebalance tree
 	retrace(root, subtree);

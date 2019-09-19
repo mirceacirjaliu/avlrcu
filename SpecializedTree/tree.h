@@ -25,26 +25,74 @@ struct sptree_root {
 	struct sptree_node *root;
 };
 
+// flags set on parent pointer to fast determine on which side of the parent we are
+#define RIGHT_CHILD 0
+#define LEFT_CHILD 1
 
-static inline bool is_root(struct sptree_node *node)
-{
-	return node->parent == NULL;
-}
+#define PARENT_FLAGS 1
 
 static inline bool is_leaf(struct sptree_node *node)
 {
 	return node->left == NULL && node->right == NULL;
 }
 
-static inline bool is_left_child(struct sptree_node *node)
+static inline bool is_root(struct sptree_node *parent)
 {
-	if (is_root(node))
-		return false;
-	if (node->parent->left == node)
-		return true;
-	return false;
+	return parent == NULL;
 }
 
+static inline bool is_left_child(struct sptree_node *parent)
+{
+	return (unsigned long)parent & LEFT_CHILD;
+}
+
+static inline struct sptree_node *make_left(struct sptree_node *parent)
+{
+	return (struct sptree_node *) ((unsigned long)parent | LEFT_CHILD);
+}
+
+static inline struct sptree_node *make_right(struct sptree_node *parent)
+{
+	return (struct sptree_node *) ((unsigned long)parent & ~LEFT_CHILD);
+}
+
+static inline struct sptree_node *strip_flag(struct sptree_node *parent)
+{
+	return (struct sptree_node *) ((unsigned long)parent & ~PARENT_FLAGS);
+}
+
+/*
+ * Returns the address of the pointer pointing to current node.
+ */
+static inline struct sptree_node **get_pnode(struct sptree_root *root, struct sptree_node *parent)
+{
+	if (is_root(parent))
+		return &root->root;
+	else if (is_left_child(parent))
+		return &strip_flag(parent)->left;
+	else
+		return &strip_flag(parent)->right;
+}
+
+static inline char node_balancing(const struct sptree_node *node)
+{
+	switch (node->balancing)
+	{
+	case -1:
+		return 'L';
+	case 0:
+		return 'B';
+	case 1:
+		return 'R';
+	default:
+		return '?';
+	}
+}
+
+#define NODE_FMT "(%lx-%lx,%c)"
+#define NODE_ARG(__node) (__node)->start, (__node)->start + (__node)->length, node_balancing(__node)
+
+/*
 static inline bool is_right_child(struct sptree_node *node)
 {
 	if (is_root(node))
@@ -58,6 +106,8 @@ static inline bool has_children(struct sptree_node *node)
 {
 	return node->left || node->right;
 }
+*/
+
 
 // TODO: starea ar trebui sa zica din ce directie a venit
 // TODO: cand intram intr-un nod (de sus), mai intai cautam in stanga

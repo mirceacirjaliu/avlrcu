@@ -42,6 +42,9 @@ static void validate_greater(struct sptree_root *root)
 
 	prev = 0;
 	sptree_for_each_node(&iter, root) {
+		// TODO: remove
+		//pr_info("%lx-%lx ", iter.node->start, iter.node->start + iter.node->length);
+
 		if (prev >= iter.node->start) {
 			result = -EINVAL;
 			break;
@@ -49,6 +52,9 @@ static void validate_greater(struct sptree_root *root)
 
 		prev = iter.node->start;
 	}
+
+	// TODO: remove
+	//pr_info("\n");
 
 	rcu_read_unlock();
 
@@ -93,7 +99,7 @@ static int validator_func(void *arg)
 		// a node can't be a free-range
 		validate_nodes(&range);
 
-		msleep_interruptible(100);
+		msleep_interruptible(1000);
 
 	} while (!kthread_should_stop());
 
@@ -133,6 +139,7 @@ static ssize_t insert_map(struct file *file, const char __user *data, size_t cou
 		pr_info("%s: success\n", __func__);
 	else
 		pr_err("%s: failed: %d\n", __func__, result);
+	pr_info("-\n");
 
 	*offs += count;
 	return count;
@@ -170,6 +177,7 @@ static ssize_t delete_map(struct file *file, const char __user *data, size_t cou
 		pr_info("%s: success\n", __func__);
 	else
 		pr_err("%s: failed: %d\n", __func__, result);
+	pr_info("-\n");
 
 	*offs += count;
 	return count;
@@ -206,6 +214,7 @@ static ssize_t ror_map(struct file *file, const char __user *data, size_t count,
 		pr_info("%s: success\n", __func__);
 	else
 		pr_err("%s: failed: %d\n", __func__, result);
+	pr_info("-\n");
 
 	*offs += count;
 	return count;
@@ -242,6 +251,7 @@ static ssize_t rol_map(struct file *file, const char __user *data, size_t count,
 		pr_info("%s: success\n", __func__);
 	else
 		pr_err("%s: failed: %d\n", __func__, result);
+	pr_info("-\n");
 
 	*offs += count;
 	return count;
@@ -273,7 +283,8 @@ static void *dump_start(struct seq_file *s, loff_t *pos)
 	s->private = iter;
 
 	// print header
-	seq_puts(s, "digraph G { \n");
+	seq_puts(s, "digraph G {\n");
+	seq_puts(s, "\troot [label=\"ROOT\", shape=box]\n");
 
 	return iter;
 }
@@ -282,12 +293,13 @@ static int dump_show(struct seq_file *s, void *v)
 {
 	struct sptree_iterator *iter = v;
 	struct sptree_node *node = iter->node;
+	struct sptree_node *parent = node->parent;	// may contain L/R flags
 	struct sptree_node *left = node->left;
 	struct sptree_node *right = node->right;
 
-	seq_printf(s, "\tn%lx [label=\"S=%lx\\nL=%lx\\n%d\", style=filled, fillcolor=%s]\n",
-		(unsigned long)node, node->start, node->length, node->balancing,
-		node->mapping ? "red" : "green");
+	seq_printf(s, "\tn%lx [label=\"%lx - %lx\\n%c\", style=filled, fillcolor=%s]\n",
+		(unsigned long)node, node->start, node->start + node->length,
+		node_balancing(node), node->mapping ? "red" : "green");
 
 	if (left)
 		seq_printf(s, "\tn%lx -> n%lx [tailport=w]\n",
@@ -296,6 +308,21 @@ static int dump_show(struct seq_file *s, void *v)
 	if (right)
 		seq_printf(s, "\tn%lx -> n%lx [tailport=e]\n",
 		(unsigned long)node, (unsigned long)right);
+
+	if (is_root(parent)) {
+		seq_printf(s, "\troot -> n%lx [tailport=s]\n",
+			(unsigned long)node);
+		seq_printf(s, "\tn%lx -> root [headport=s, tailport=n, style=dotted, color=lightgrey]\n",
+			(unsigned long)node);
+	}
+	else if (is_left_child(parent)) {
+		seq_printf(s, "\tn%lx -> n%lx [headport=w, tailport=n, style=dotted, color=lightgrey]\n",
+			(unsigned long)node, (unsigned long)strip_flag(parent));
+	}
+	else {
+		seq_printf(s, "\tn%lx -> n%lx [headport=e, tailport=n, style=dotted, color=lightgrey]\n",
+			(unsigned long)node, (unsigned long)strip_flag(parent));
+	}
 
 	return 0;
 }
@@ -310,7 +337,7 @@ static void *dump_next(struct seq_file *s, void *v, loff_t *pos)
 	struct sptree_iterator *iter = v;
 
 	sptree_iter_next(iter);
-	if (iter->state == ITER_DONE)
+	if (iter->node == NULL)
 		return NULL;
 
 	(*pos)++;
