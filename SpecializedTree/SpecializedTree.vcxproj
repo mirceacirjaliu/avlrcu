@@ -86,6 +86,7 @@
     <RemoteBuildCommandLine>make</RemoteBuildCommandLine>
     <RemoteBuildOutputs>specialized-tree.ko</RemoteBuildOutputs>
     <RemoteCleanCommandLine>make clean</RemoteCleanCommandLine>
+    <RemoteReBuildCommandLine>make</RemoteReBuildCommandLine>
   </PropertyGroup>
   <ItemGroup>
     <Text Include="Makefile" />

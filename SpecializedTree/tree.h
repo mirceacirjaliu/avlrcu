@@ -148,6 +148,4 @@ extern int sptree_rol(struct sptree_root *root, unsigned long addr);
 
 extern struct sptree_node *sptree_search(struct sptree_root *root, unsigned long addr);
 
-extern int inorder_walk(struct sptree_root *root, int (*nosleep)(struct sptree_node *node));
-
 #endif // _SPECIALIZED_TREE_H_

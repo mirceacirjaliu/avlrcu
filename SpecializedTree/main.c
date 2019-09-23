@@ -18,7 +18,7 @@
 #include "main.h"
 
 // the object we test
-static struct sptree_root range;
+static struct sptree_root sptree_range;
 static DEFINE_SPINLOCK(lock);
 
 // thread control
@@ -91,13 +91,13 @@ static int validator_func(void *arg)
 
 	do {
 		// validate each element is greater than the last
-		validate_greater(&range);
+		validate_greater(&sptree_range);
 
-		// a leaf is part of the initial range (or whole if no mappings)
+		// a leaf is part of the initial sptree_range (or whole if no mappings)
 		// otherwise a node (has children) is a mapping
 		// a leaf can also be a mapping if surrounded by other mappings
-		// a node can't be a free-range
-		validate_nodes(&range);
+		// a node can't be a free-sptree_range
+		validate_nodes(&sptree_range);
 
 		msleep_interruptible(1000);
 
@@ -125,14 +125,14 @@ static ssize_t insert_map(struct file *file, const char __user *data, size_t cou
 		return -EINVAL;
 	}
 
-	// check if inside the range
-	if (value < range.start || value > range.start + range.length - PAGE_SIZE) {
-		pr_err("%s: outside range: %lx-%lx\n", __func__, range.start, range.start + range.length);
+	// check if inside the sptree_range
+	if (value < sptree_range.start || value > sptree_range.start + sptree_range.length - PAGE_SIZE) {
+		pr_err("%s: outside sptree_range: %lx-%lx\n", __func__, sptree_range.start, sptree_range.start + sptree_range.length);
 		return -EINVAL;
 	}
 
 	spin_lock(&lock);
-	result = sptree_insert(&range, value);
+	result = sptree_insert(&sptree_range, value);
 	spin_unlock(&lock);
 
 	if (result == 0)
@@ -162,9 +162,9 @@ static ssize_t delete_map(struct file *file, const char __user *data, size_t cou
 		return -EINVAL;
 	}
 
-	// check if inside the range
-	if (value < range.start || value > range.start + range.length - PAGE_SIZE) {
-		pr_err("%s: outside range: %lx-%lx\n", __func__, range.start, range.start + range.length);
+	// check if inside the sptree_range
+	if (value < sptree_range.start || value > sptree_range.start + sptree_range.length - PAGE_SIZE) {
+		pr_err("%s: outside sptree_range: %lx-%lx\n", __func__, sptree_range.start, sptree_range.start + sptree_range.length);
 		return -EINVAL;
 	}
 
@@ -200,14 +200,14 @@ static ssize_t ror_map(struct file *file, const char __user *data, size_t count,
 		return -EINVAL;
 	}
 
-	// check if inside the range
-	if (value < range.start || value > range.start + range.length - PAGE_SIZE) {
-		pr_err("%s: outside range: %lx-%lx\n", __func__, range.start, range.start + range.length);
+	// check if inside the sptree_range
+	if (value < sptree_range.start || value > sptree_range.start + sptree_range.length - PAGE_SIZE) {
+		pr_err("%s: outside sptree_range: %lx-%lx\n", __func__, sptree_range.start, sptree_range.start + sptree_range.length);
 		return -EINVAL;
 	}
 
 	spin_lock(&lock);
-	result = sptree_ror(&range, value);
+	result = sptree_ror(&sptree_range, value);
 	spin_unlock(&lock);
 
 	if (result == 0)
@@ -237,14 +237,14 @@ static ssize_t rol_map(struct file *file, const char __user *data, size_t count,
 		return -EINVAL;
 	}
 
-	// check if inside the range
-	if (value < range.start || value > range.start + range.length - PAGE_SIZE) {
-		pr_err("%s: outside range: %lx-%lx\n", __func__, range.start, range.start + range.length);
+	// check if inside the sptree_range
+	if (value < sptree_range.start || value > sptree_range.start + sptree_range.length - PAGE_SIZE) {
+		pr_err("%s: outside sptree_range: %lx-%lx\n", __func__, sptree_range.start, sptree_range.start + sptree_range.length);
 		return -EINVAL;
 	}
 
 	spin_lock(&lock);
-	result = sptree_rol(&range, value);
+	result = sptree_rol(&sptree_range, value);
 	spin_unlock(&lock);
 
 	if (result == 0)
@@ -277,7 +277,7 @@ static void *dump_start(struct seq_file *s, loff_t *pos)
 	//rcu_read_lock();
 	// WARNING: bad unlock balance detected!
 
-	sptree_iter_first(&range, iter);
+	sptree_iter_first(&sptree_range, iter);
 
 	// save iter to private, to be released later
 	s->private = iter;
@@ -451,8 +451,8 @@ static int __init sptree_test_init(void)
 {
 	int result;
 
-	// create the range: 4KB - 1MB
-	result = sptree_init(&range, 4 * KB, 1 * MB - 4 * KB);
+	// create the sptree_range: 4KB - 1MB
+	result = sptree_init(&sptree_range, 4 * KB, 1 * MB - 4 * KB);
 	if (result)
 		return result;
 
@@ -473,7 +473,7 @@ static int __init sptree_test_init(void)
 out_debugfs:
 	debugfs_remove_recursive(debugfs_dir);
 out_tree:
-	sptree_free(&range);
+	sptree_free(&sptree_range);
 
 	return result;
 }
@@ -484,7 +484,7 @@ static void __exit sptree_test_exit(void)
 
 	kthread_stop(validator);
 
-	sptree_free(&range);
+	sptree_free(&sptree_range);
 
 	pr_info("bye bye\n");
 }

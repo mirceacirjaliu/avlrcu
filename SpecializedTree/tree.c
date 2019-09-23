@@ -55,41 +55,6 @@ void sptree_free(struct sptree_root *root)
 }
 
 
-// recursive in-order walk function
-static int inorder(struct sptree_node *node, int(*cb)(struct sptree_node *node))
-{
-	int result;
-
-	if (node->left) {
-		result = inorder(node->left, cb);
-		if (result)
-			return result;
-	}
-
-	result = cb(node);
-	if (result)
-		return result;
-
-	if (node->right) {
-		result = inorder(node->right, cb);
-		if (result)
-			return result;
-	}
-
-	return 0;
-}
-
-int inorder_walk(struct sptree_root *root, int(*nosleep)(struct sptree_node *node))
-{
-	int result;
-
-	rcu_read_lock();
-	result = inorder(root->root, nosleep);
-	rcu_read_unlock();
-
-	return result;
-}
-
 
 
 // search for the node containing this address
@@ -116,7 +81,7 @@ static struct sptree_node *search(struct sptree_root *root, unsigned long addr)
 	return crnt;
 }
 
-extern struct sptree_node *sptree_search(struct sptree_root *root, unsigned long addr)
+struct sptree_node *sptree_search(struct sptree_root *root, unsigned long addr)
 {
 	struct sptree_node *result;
 
@@ -129,7 +94,7 @@ extern struct sptree_node *sptree_search(struct sptree_root *root, unsigned long
 
 
 
-extern void sptree_iter_first(struct sptree_root *root, struct sptree_iterator *iter)
+void sptree_iter_first(struct sptree_root *root, struct sptree_iterator *iter)
 {
 	if (unlikely(root->root == NULL)) {
 		iter->node = NULL;
@@ -143,7 +108,7 @@ extern void sptree_iter_first(struct sptree_root *root, struct sptree_iterator *
 	sptree_iter_next(iter);
 }
 
-extern void sptree_iter_next(struct sptree_iterator *iter)
+void sptree_iter_next(struct sptree_iterator *iter)
 {
 	struct sptree_node *next;
 
@@ -172,11 +137,6 @@ extern void sptree_iter_next(struct sptree_iterator *iter)
 			}
 			break;
 
-		// TODO: this state can be optimized with the 2nd branch in ITER_RIGHT
-		case ITER_LEFT:					// comes from the left subtree
-			iter->state = ITER_HANDLED;		// will handle the node
-			return;
-
 		case ITER_RIGHT:				// comes from right subtree
 back_to_parent:
 			next = READ_ONCE(iter->node->parent);	// may contain L/R flags
@@ -187,10 +147,11 @@ back_to_parent:
 				return;
 			}
 			else if (is_left_child(next)) {
-				iter->state = ITER_LEFT;
+				iter->state = ITER_HANDLED;	// directly handle the node
+				return;
 			}
 			else {
-				iter->state = ITER_RIGHT;
+				iter->state = ITER_RIGHT;	// right subtree has been handled
 			}
 			break;
 
@@ -207,14 +168,11 @@ back_to_parent:
 static struct sptree_node *rotate_right(struct sptree_node *root, struct sptree_node **proot)
 {
 	struct sptree_node *pivot = root->left;
-	struct sptree_node *new_pivot;
 	struct sptree_node *new_root;
+	struct sptree_node *new_pivot;
 
-	// TODO: these 2 variables change roles, rename them accordingly
-
-	pr_info("%s: rotate right at %lx-%lx, pivot at %lx-%lx\n", __func__,
-		root->start, root->start + root->length,
-		pivot->start, pivot->start + pivot->length);
+	pr_info("%s: rotate right at "NODE_FMT", pivot at "NODE_FMT"\n",
+		__func__, NODE_ARG(root), NODE_ARG(pivot));
 
 	BUG_ON(*proot != root);
 	BUG_ON(!root->mapping);
@@ -222,71 +180,71 @@ static struct sptree_node *rotate_right(struct sptree_node *root, struct sptree_
 	BUG_ON(!pivot->mapping);
 
 	// alloc new nodes
-	new_pivot = kzalloc(sizeof(*new_pivot), GFP_ATOMIC);
-	if (!new_pivot)
+	new_root = kzalloc(sizeof(*new_root), GFP_ATOMIC);
+	if (!new_root)
 		return NULL;
 
-	new_root = kzalloc(sizeof(*new_root), GFP_ATOMIC);
-	if (!new_root) {
-		kfree(new_pivot);
+	new_pivot = kzalloc(sizeof(*new_pivot), GFP_ATOMIC);
+	if (!new_pivot) {
+		kfree(new_root);
 		return NULL;
 	}
 
-	// copy to new nodes
-	memcpy(new_pivot, pivot, sizeof(struct sptree_node));
-	memcpy(new_root, root, sizeof(struct sptree_node));
+	// copy to new nodes (nodes change role)
+	memcpy(new_root, pivot, sizeof(struct sptree_node));
+	memcpy(new_pivot, root, sizeof(struct sptree_node));
 
-	// link direct pointers
-	new_pivot->left = pivot->left;
-	new_pivot->right = new_root;
-	new_pivot->parent = root->parent;	// may contail L/R flags or NULL
+	// link direct pointers (new nodes not reachable yet)
+	new_root->left = pivot->left;
+	new_root->right = new_pivot;
+	new_root->parent = root->parent;	// may contail L/R flags or NULL
 
-	new_root->parent = make_right(new_pivot);
-	new_root->left = pivot->right;
-	new_root->right = root->right;
+	new_pivot->parent = make_right(new_root);
+	new_pivot->left = pivot->right;
+	new_pivot->right = root->right;
 
 	// link root (of subtree)
-	WRITE_ONCE(*proot, new_pivot);
+	WRITE_ONCE(*proot, new_root);
 
 	// link parent pointers
 	if (pivot->left)
-		WRITE_ONCE(pivot->left->parent, make_left(new_pivot));
+		WRITE_ONCE(pivot->left->parent, make_left(new_root));
 	if (pivot->right)
-		WRITE_ONCE(pivot->right->parent, make_left(new_root));
+		WRITE_ONCE(pivot->right->parent, make_left(new_pivot));
 	if (root->right)
-		WRITE_ONCE(root->right->parent, make_right(new_root));
+		WRITE_ONCE(root->right->parent, make_right(new_pivot));
 
 	// fix balance factors
 	if (pivot->balancing == 0) {
-		new_pivot->balancing = 1;
-		new_root->balancing = -1;
+		new_root->balancing = 1;
+		new_pivot->balancing = -1;
 	}
 	else {
-		new_root->balancing = 0;
 		new_pivot->balancing = 0;
+		new_root->balancing = 0;
 	}
 
 	// free old nodes
 	kfree_rcu(root, rcu);
 	kfree_rcu(pivot, rcu);
 
-	pr_info("%s: rotated right, new root is "NODE_FMT"\n", __func__, NODE_ARG(new_pivot));
+	pr_info("%s: rotated right, new root is "NODE_FMT"\n",
+		__func__, NODE_ARG(new_root));
 
-	return new_pivot;
+	return new_root;
 }
 
 // same as above, changed direction
 static struct sptree_node *rotate_left(struct sptree_node *root, struct sptree_node **proot)
 {
 	struct sptree_node *pivot = root->right;
-	struct sptree_node *new_pivot;
 	struct sptree_node *new_root;
+	struct sptree_node *new_pivot;
 
 	// TODO: these 2 variables change roles, rename them accordingly
 
-	pr_info("%s: rotate left at %lx-%lx, pivot at %lx-%lx\n", __func__,
-		root->start, root->start + root->length,
-		pivot->start, pivot->start + pivot->length);
+	pr_info("%s: rotate left at "NODE_FMT", pivot at "NODE_FMT"\n",
+		__func__, NODE_ARG(root), NODE_ARG(pivot));
 
 	BUG_ON(*proot != root);
 	BUG_ON(!root->mapping);
@@ -294,48 +252,48 @@ static struct sptree_node *rotate_left(struct sptree_node *root, struct sptree_n
 	BUG_ON(!pivot->mapping);
 
 	// alloc new nodes
-	new_pivot = kzalloc(sizeof(*new_pivot), GFP_ATOMIC);
-	if (!new_pivot)
+	new_root = kzalloc(sizeof(*new_root), GFP_ATOMIC);
+	if (!new_root)
 		return NULL;
 
-	new_root = kzalloc(sizeof(*new_root), GFP_ATOMIC);
-	if (!new_root) {
-		kfree(new_pivot);
+	new_pivot = kzalloc(sizeof(*new_pivot), GFP_ATOMIC);
+	if (!new_pivot) {
+		kfree(new_root);
 		return NULL;
 	}
 
 	// copy to new nodes
-	memcpy(new_pivot, pivot, sizeof(struct sptree_node));
-	memcpy(new_root, root, sizeof(struct sptree_node));
+	memcpy(new_root, pivot, sizeof(struct sptree_node));
+	memcpy(new_pivot, root, sizeof(struct sptree_node));
 
 	// link direct pointers to new nodes
-	new_pivot->left = new_root;
-	new_pivot->right = pivot->right;
-	new_pivot->parent = root->parent;	// may contail L/R flags
+	new_root->left = new_pivot;
+	new_root->right = pivot->right;
+	new_root->parent = root->parent;	// may contail L/R flags
 
-	new_root->parent = make_left(new_pivot);
-	new_root->left = root->left;
-	new_root->right = pivot->left;
+	new_pivot->parent = make_left(new_root);
+	new_pivot->left = root->left;
+	new_pivot->right = pivot->left;
 
 	// link root (of subtree)
-	WRITE_ONCE(*proot, new_pivot);
+	WRITE_ONCE(*proot, new_root);
 
 	// link parent pointers
 	if (root->left)
-		WRITE_ONCE(root->left->parent, make_left(new_root));
+		WRITE_ONCE(root->left->parent, make_left(new_pivot));
 	if (pivot->left)
-		WRITE_ONCE(pivot->left->parent, make_right(new_root));
+		WRITE_ONCE(pivot->left->parent, make_right(new_pivot));
 	if (pivot->right)
-		WRITE_ONCE(pivot->right->parent, make_right(new_pivot));
+		WRITE_ONCE(pivot->right->parent, make_right(new_root));
 
 	// fix balance factors
 	if (pivot->balancing == 0) {
-		new_pivot->balancing = 1;
-		new_root->balancing = -1;
+		new_root->balancing = 1;
+		new_pivot->balancing = -1;
 	}
 	else {
-		new_root->balancing = 0;
 		new_pivot->balancing = 0;
+		new_root->balancing = 0;
 	}
 
 	// free old nodes
@@ -343,9 +301,9 @@ static struct sptree_node *rotate_left(struct sptree_node *root, struct sptree_n
 	kfree_rcu(pivot, rcu);
 
 	pr_info("%s: rotated left, new root is "NODE_FMT"\n",
-		__func__, NODE_ARG(new_pivot));
+		__func__, NODE_ARG(new_root));
 
-	return new_pivot;
+	return new_root;
 }
 
 static struct sptree_node *rotate_right_left(struct sptree_node *root, struct sptree_node **proot)
@@ -358,8 +316,7 @@ static struct sptree_node *rotate_right_left(struct sptree_node *root, struct sp
 	struct sptree_node *new_left;			// new X
 	struct sptree_node *new_right;			// new Z
 
-	pr_info("%s: rotate right-left at %lx-%lx\n", __func__,
-		root->start, root->start + root->length);
+	pr_info("%s: rotate right-left at "NODE_FMT"\n", __func__, NODE_ARG(root));
 
 	// rotate right on Z
 	if (!rotate_right(right, pright))
@@ -408,8 +365,7 @@ static struct sptree_node *rotate_left_right(struct sptree_node *root, struct sp
 	struct sptree_node *new_left;			// new Z
 	struct sptree_node *new_right;			// new X
 
-	pr_info("%s: rotate left-right at %lx-%lx\n", __func__,
-		root->start, root->start + root->length);
+	pr_info("%s: rotate left-right at "NODE_FMT"\n", __func__, NODE_ARG(root));
 
 	// rotate left on Z
 	if (!rotate_left(left, pleft))
@@ -478,7 +434,7 @@ int sptree_ror(struct sptree_root *root, unsigned long addr)
 
 	// validate the node
 	if (!target->mapping) {
-		pr_err("found node (%lx, %lx), not a mapping\n", target->start, target->length);
+		pr_err("found node "NODE_FMT", not a mapping\n", NODE_ARG(target));
 		return -EINVAL;
 	}
 	if (!target->left) {
@@ -521,7 +477,7 @@ int sptree_rol(struct sptree_root *root, unsigned long addr)
 	}
 
 	if (!target->mapping) {
-		pr_err("found node (%lx, %lx), not a mapping\n", target->start, target->length);
+		pr_err("found node "NODE_FMT", not a mapping\n", NODE_ARG(target));
 		return -EINVAL;
 	}
 	if (!target->right) {
@@ -585,11 +541,15 @@ static int retrace(struct sptree_root *root, struct sptree_node *node)
 			// parent is right-heavy
 			else if (parent->balancing > 0) {
 				parent->balancing = 0;
+				pr_info("%s: parent becomes balanced: "NODE_FMT", stop\n",
+					__func__, NODE_ARG(parent));
 				break;
 			}
 			// parent is balanced
 			else {
 				parent->balancing = -1;
+				pr_info("%s: parent becomes unbalanced: "NODE_FMT", continue\n",
+					__func__, NODE_ARG(parent));
 			}
 		}
 		else {						// node is right child of parent
@@ -614,11 +574,15 @@ static int retrace(struct sptree_root *root, struct sptree_node *node)
 			// parent is left-heavy
 			else if (parent->balancing < 0) {
 				parent->balancing = 0;
+				pr_info("%s: parent becomes balanced: "NODE_FMT", stop\n",
+					__func__, NODE_ARG(parent));
 				break;
 			}
 			// parent is balanced
 			else {
 				parent->balancing = +1;
+				pr_info("%s: parent becomes unbalanced: "NODE_FMT", continue\n",
+					__func__, NODE_ARG(parent));
 			}
 		}
 	}
