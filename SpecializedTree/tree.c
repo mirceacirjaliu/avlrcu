@@ -145,12 +145,10 @@ back_to_parent:
 			if (is_root(next)) {
 				iter->state = ITER_DONE;
 				return;
-			}
-			else if (is_left_child(next)) {
+			} else if (is_left_child(next)) {
 				iter->state = ITER_HANDLED;	// directly handle the node
 				return;
-			}
-			else {
+			} else {
 				iter->state = ITER_RIGHT;	// right subtree has been handled
 			}
 			break;
@@ -218,8 +216,7 @@ static struct sptree_node *rotate_right(struct sptree_node *root, struct sptree_
 	if (pivot->balancing == 0) {
 		new_root->balancing = 1;
 		new_pivot->balancing = -1;
-	}
-	else {
+	} else {
 		new_pivot->balancing = 0;
 		new_root->balancing = 0;
 	}
@@ -240,8 +237,6 @@ static struct sptree_node *rotate_left(struct sptree_node *root, struct sptree_n
 	struct sptree_node *pivot = root->right;
 	struct sptree_node *new_root;
 	struct sptree_node *new_pivot;
-
-	// TODO: these 2 variables change roles, rename them accordingly
 
 	pr_info("%s: rotate left at "NODE_FMT", pivot at "NODE_FMT"\n",
 		__func__, NODE_ARG(root), NODE_ARG(pivot));
@@ -290,8 +285,7 @@ static struct sptree_node *rotate_left(struct sptree_node *root, struct sptree_n
 	if (pivot->balancing == 0) {
 		new_root->balancing = 1;
 		new_pivot->balancing = -1;
-	}
-	else {
+	} else {
 		new_pivot->balancing = 0;
 		new_root->balancing = 0;
 	}
@@ -334,14 +328,11 @@ static struct sptree_node *rotate_right_left(struct sptree_node *root, struct sp
 	if (left->balancing > 0) {
 		new_left->balancing = -1;
 		new_right->balancing = 0;
-	}
-	else {
+	} else {
 		if (left->balancing == 0) {
 			new_left->balancing = 0;
 			new_right->balancing = 0;
-		}
-		else
-		{
+		} else {
 			new_left->balancing = 0;
 			new_right->balancing = 1;
 		}
@@ -383,15 +374,11 @@ static struct sptree_node *rotate_left_right(struct sptree_node *root, struct sp
 	if (right->balancing > 0) {
 		new_right->balancing = -1;
 		new_left->balancing = 0;
-	}
-	else
-	{
+	} else {
 		if (right->balancing == 0) {
 			new_right->balancing = 0;
 			new_left->balancing = 0;
-		}
-		else
-		{
+		} else {
 			new_right->balancing = 0;
 			new_left->balancing = 1;
 		}

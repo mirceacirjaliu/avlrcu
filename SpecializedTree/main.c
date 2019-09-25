@@ -42,9 +42,6 @@ static void validate_greater(struct sptree_root *root)
 
 	prev = 0;
 	sptree_for_each_node(&iter, root) {
-		// TODO: remove
-		//pr_info("%lx-%lx ", iter.node->start, iter.node->start + iter.node->length);
-
 		if (prev >= iter.node->start) {
 			result = -EINVAL;
 			break;
@@ -52,9 +49,6 @@ static void validate_greater(struct sptree_root *root)
 
 		prev = iter.node->start;
 	}
-
-	// TODO: remove
-	//pr_info("\n");
 
 	rcu_read_unlock();
 
@@ -119,7 +113,7 @@ static ssize_t insert_map(struct file *file, const char __user *data, size_t cou
 
 	pr_info("%s: at %lx\n", __func__, value);
 
-	// check if alligned to page
+	// check if aligned to page
 	if (value & ~PAGE_MASK) {
 		pr_err("%s: non-aligned value: %lx\n", __func__, value);
 		return -EINVAL;
@@ -169,8 +163,7 @@ static ssize_t delete_map(struct file *file, const char __user *data, size_t cou
 	}
 
 	spin_lock(&lock);
-	// TODO: delete node
-	// ...
+	result = sptree_delete(&sptree_range, value);
 	spin_unlock(&lock);
 
 	if (result == 0)
