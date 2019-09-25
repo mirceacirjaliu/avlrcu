@@ -257,29 +257,25 @@ static ssize_t rol_map(struct file *file, const char __user *data, size_t count,
 	return count;
 }
 
-// All the printing has to be done in a single session, otherwise it's not RCU compatible.
-// However, the seq_file code(by design) will not sleep between the calls to start() and stop()...
-// I also hope the printing functions don't sleep...
+
 static void *dump_start(struct seq_file *s, loff_t *pos)
 {
-	struct sptree_iterator *iter;
+	struct sptree_iterator *iter = s->private;
 
-	// all the printing is done in a single session
-	if (*pos != 0)
-		return NULL;
+	// did we have overflow ??
+	if (iter) {
+		if (iter->node == NULL)
+			return NULL;
+		else
+			return iter;
+	}
 
 	// alloc & init iterator
 	iter = kmalloc(sizeof(*iter), GFP_KERNEL);
 	if (!iter)
 		return NULL;
 
-	// iterate in RCU-locked context
-	//rcu_read_lock();
-	// WARNING: bad unlock balance detected!
-
 	sptree_iter_first(&sptree_range, iter);
-
-	// save iter to private, to be released later
 	s->private = iter;
 
 	// print header
@@ -291,7 +287,7 @@ static void *dump_start(struct seq_file *s, loff_t *pos)
 
 static int dump_show(struct seq_file *s, void *v)
 {
-	struct sptree_iterator *iter = v;
+	struct sptree_iterator *iter = s->private;
 	struct sptree_node *node = iter->node;
 	struct sptree_node *parent = node->parent;	// may contain L/R flags
 	struct sptree_node *left = node->left;
@@ -327,14 +323,9 @@ static int dump_show(struct seq_file *s, void *v)
 	return 0;
 }
 
-/* The return value is passed to next show.
- * If NULL, stop is called next instead of show, and read ends.
- *
- * Can get called multiple times, until enough data is returned for the read.
- */
 static void *dump_next(struct seq_file *s, void *v, loff_t *pos)
 {
-	struct sptree_iterator *iter = v;
+	struct sptree_iterator *iter = s->private;
 
 	sptree_iter_next(iter);
 	if (iter->node == NULL)
@@ -344,21 +335,13 @@ static void *dump_next(struct seq_file *s, void *v, loff_t *pos)
 	return iter;
 }
 
-/* Called at the end of every read. */
 static void dump_stop(struct seq_file *s, void *v)
 {
-	// this will be NULL
-	//struct sptree_iterator *iter = v;
-
-	// iteration stopped
-	//rcu_read_unlock();
-	// WARNING: bad unlock balance detected!
+	struct sptree_iterator *iter = s->private;
 
 	// print footer
-	seq_puts(s, "}\n");
-
-	// this will contain iter
-	//kfree(s->private);
+	if (iter->node == NULL)
+		seq_puts(s, "}\n");
 }
 
 static struct seq_operations dump_seq_ops = {
@@ -370,6 +353,9 @@ static struct seq_operations dump_seq_ops = {
 
 int dump_open(struct inode *inode, struct file *file)
 {
+	// can't seek on a tree without a walk & ignore
+	file->f_mode &= ~FMODE_LSEEK;
+
 	return seq_open(file, &dump_seq_ops);
 }
 
@@ -398,7 +384,7 @@ static struct file_operations dump_map_ops = {
 	.open = dump_open,
 	.read = seq_read,
 	.llseek = seq_lseek,
-	.release = seq_release
+	.release = seq_release_private
 };
 
 static int __init sptree_debugfs_init(void)
