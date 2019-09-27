@@ -61,9 +61,7 @@ static inline struct sptree_node *strip_flag(struct sptree_node *parent)
 	return (struct sptree_node *) ((unsigned long)parent & ~PARENT_FLAGS);
 }
 
-/*
- * Returns the address of the pointer pointing to current node.
- */
+/* Returns the address of the pointer pointing to current node based on node->parent. */
 static inline struct sptree_node **get_pnode(struct sptree_root *root, struct sptree_node *parent)
 {
 	if (is_root(parent))
@@ -74,6 +72,7 @@ static inline struct sptree_node **get_pnode(struct sptree_root *root, struct sp
 		return &strip_flag(parent)->right;
 }
 
+/* For dumping purposes. */
 static inline char node_balancing(const struct sptree_node *node)
 {
 	switch (node->balancing)
@@ -92,21 +91,6 @@ static inline char node_balancing(const struct sptree_node *node)
 #define NODE_FMT "(%lx-%lx,%c)"
 #define NODE_ARG(__node) (__node)->start, (__node)->start + (__node)->length, node_balancing(__node)
 
-/*
-static inline bool is_right_child(struct sptree_node *node)
-{
-	if (is_root(node))
-		return false;
-	if (node->parent->right == node)
-		return true;
-	return false;
-}
-
-static inline bool has_children(struct sptree_node *node)
-{
-	return node->left || node->right;
-}
-*/
 
 
 // TODO: starea ar trebui sa zica din ce directie a venit
@@ -128,11 +112,20 @@ struct sptree_iterator {
 	enum sptree_iter_state state;
 };
 
-extern void sptree_iter_first(struct sptree_root *root, struct sptree_iterator *iter);
-extern void sptree_iter_next(struct sptree_iterator *iter);
+/* In-order iteration (should be immune to tree operations) */
+extern void sptree_iter_first_io(struct sptree_root *root, struct sptree_iterator *iter);
+extern void sptree_iter_next_io(struct sptree_iterator *iter);
 
-#define sptree_for_each_node(_iter, _root)	\
-	for (sptree_iter_first(_root, _iter); (_iter)->state != ITER_DONE; sptree_iter_next(_iter))
+#define sptree_for_each_node_io(_iter, _root)	\
+	for (sptree_iter_first_io(_root, _iter); (_iter)->node != NULL; sptree_iter_next_io(_iter))
+
+
+/* Pre-order iteration (don't know if immune to tree operations) */
+extern void sptree_iter_first_po(struct sptree_root *root, struct sptree_iterator *iter);
+extern void sptree_iter_next_po(struct sptree_iterator *iter);
+
+#define sptree_for_each_node_po(_iter, _root)	\
+	for (sptree_iter_first_po(_root, _iter); (_iter)->node != NULL; sptree_iter_next_po(_iter))
 
 
 extern int sptree_init(struct sptree_root *root, unsigned long start, size_t length);
@@ -145,6 +138,8 @@ extern int sptree_delete(struct sptree_root *root, unsigned long addr);
 // same for these
 extern int sptree_ror(struct sptree_root *root, unsigned long addr);
 extern int sptree_rol(struct sptree_root *root, unsigned long addr);
+extern int sptree_rrl(struct sptree_root *root, unsigned long addr);
+extern int sptree_rlr(struct sptree_root *root, unsigned long addr);
 
 extern struct sptree_node *sptree_search(struct sptree_root *root, unsigned long addr);
 

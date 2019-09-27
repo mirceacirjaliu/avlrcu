@@ -26,11 +26,6 @@ static struct task_struct *validator;
 
 // access files
 static struct dentry *debugfs_dir;
-static struct dentry *insert_file;
-static struct dentry *delete_file;
-static struct dentry *ror_file;
-static struct dentry *rol_file;
-static struct dentry *dump_file;
 
 static void validate_greater(struct sptree_root *root)
 {
@@ -41,7 +36,7 @@ static void validate_greater(struct sptree_root *root)
 	rcu_read_lock();
 
 	prev = 0;
-	sptree_for_each_node(&iter, root) {
+	sptree_for_each_node_io(&iter, root) {
 		if (prev >= iter.node->start) {
 			result = -EINVAL;
 			break;
@@ -63,7 +58,7 @@ static void validate_nodes(struct sptree_root *root)
 
 	rcu_read_lock();
 
-	sptree_for_each_node(&iter, root) {
+	sptree_for_each_node_io(&iter, root) {
 		struct sptree_node *node = iter.node;
 
 		// a node can't be a segment
@@ -250,8 +245,82 @@ static ssize_t rol_map(struct file *file, const char __user *data, size_t count,
 	return count;
 }
 
+static ssize_t rrl_map(struct file *file, const char __user *data, size_t count, loff_t *offs)
+{
+	unsigned long value;
+	int result;
 
-static void *dump_start(struct seq_file *s, loff_t *pos)
+	result = kstrtoul_from_user(data, count, 16, &value);
+	if (IS_ERR_VALUE((long)result))
+		return result;
+
+	pr_info("%s: at %lx\n", __func__, value);
+
+	// check if alligned to page
+	if (value & ~PAGE_MASK) {
+		pr_err("%s: non-aligned value: %lx\n", __func__, value);
+		return -EINVAL;
+	}
+
+	// check if inside the sptree_range
+	if (value < sptree_range.start || value > sptree_range.start + sptree_range.length - PAGE_SIZE) {
+		pr_err("%s: outside sptree_range: %lx-%lx\n", __func__, sptree_range.start, sptree_range.start + sptree_range.length);
+		return -EINVAL;
+	}
+
+	spin_lock(&lock);
+	result = sptree_rrl(&sptree_range, value);
+	spin_unlock(&lock);
+
+	if (result == 0)
+		pr_info("%s: success\n", __func__);
+	else
+		pr_err("%s: failed: %d\n", __func__, result);
+	pr_info("-\n");
+
+	*offs += count;
+	return count;
+}
+
+static ssize_t rlr_map(struct file *file, const char __user *data, size_t count, loff_t *offs)
+{
+	unsigned long value;
+	int result;
+
+	result = kstrtoul_from_user(data, count, 16, &value);
+	if (IS_ERR_VALUE((long)result))
+		return result;
+
+	pr_info("%s: at %lx\n", __func__, value);
+
+	// check if alligned to page
+	if (value & ~PAGE_MASK) {
+		pr_err("%s: non-aligned value: %lx\n", __func__, value);
+		return -EINVAL;
+	}
+
+	// check if inside the sptree_range
+	if (value < sptree_range.start || value > sptree_range.start + sptree_range.length - PAGE_SIZE) {
+		pr_err("%s: outside sptree_range: %lx-%lx\n", __func__, sptree_range.start, sptree_range.start + sptree_range.length);
+		return -EINVAL;
+	}
+
+	spin_lock(&lock);
+	result = sptree_rlr(&sptree_range, value);
+	spin_unlock(&lock);
+
+	if (result == 0)
+		pr_info("%s: success\n", __func__);
+	else
+		pr_err("%s: failed: %d\n", __func__, result);
+	pr_info("-\n");
+
+	*offs += count;
+	return count;
+}
+
+
+static void *dump_gv_start(struct seq_file *s, loff_t *pos)
 {
 	struct sptree_iterator *iter = s->private;
 
@@ -268,7 +337,7 @@ static void *dump_start(struct seq_file *s, loff_t *pos)
 	if (!iter)
 		return NULL;
 
-	sptree_iter_first(&sptree_range, iter);
+	sptree_iter_first_io(&sptree_range, iter);
 	s->private = iter;
 
 	// print header
@@ -278,7 +347,7 @@ static void *dump_start(struct seq_file *s, loff_t *pos)
 	return iter;
 }
 
-static int dump_show(struct seq_file *s, void *v)
+static int dump_gv_show(struct seq_file *s, void *v)
 {
 	struct sptree_iterator *iter = s->private;
 	struct sptree_node *node = iter->node;
@@ -316,11 +385,11 @@ static int dump_show(struct seq_file *s, void *v)
 	return 0;
 }
 
-static void *dump_next(struct seq_file *s, void *v, loff_t *pos)
+static void *dump_gv_next(struct seq_file *s, void *v, loff_t *pos)
 {
 	struct sptree_iterator *iter = s->private;
 
-	sptree_iter_next(iter);
+	sptree_iter_next_io(iter);
 	if (iter->node == NULL)
 		return NULL;
 
@@ -328,7 +397,7 @@ static void *dump_next(struct seq_file *s, void *v, loff_t *pos)
 	return iter;
 }
 
-static void dump_stop(struct seq_file *s, void *v)
+static void dump_gv_stop(struct seq_file *s, void *v)
 {
 	struct sptree_iterator *iter = s->private;
 
@@ -337,19 +406,85 @@ static void dump_stop(struct seq_file *s, void *v)
 		seq_puts(s, "}\n");
 }
 
-static struct seq_operations dump_seq_ops = {
-	.start = dump_start,
-	.next = dump_next,
-	.show = dump_show,
-	.stop = dump_stop,
+static struct seq_operations dump_gv_seq_ops = {
+	.start = dump_gv_start,
+	.next = dump_gv_next,
+	.show = dump_gv_show,
+	.stop = dump_gv_stop,
 };
 
-int dump_open(struct inode *inode, struct file *file)
+int dump_gv_open(struct inode *inode, struct file *file)
 {
 	// can't seek on a tree without a walk & ignore
 	file->f_mode &= ~FMODE_LSEEK;
 
-	return seq_open(file, &dump_seq_ops);
+	return seq_open(file, &dump_gv_seq_ops);
+}
+
+
+static void *dump_po_start(struct seq_file *s, loff_t *pos)
+{
+	struct sptree_iterator *iter = s->private;
+
+	// did we have overflow ??
+	if (iter) {
+		if (iter->node == NULL)
+			return NULL;
+		else
+			return iter;
+	}
+
+	// alloc & init iterator
+	iter = kmalloc(sizeof(*iter), GFP_KERNEL);
+	if (!iter)
+		return NULL;
+
+	sptree_iter_first_po(&sptree_range, iter);
+	s->private = iter;
+
+	return iter;
+}
+
+static int dump_po_show(struct seq_file *s, void *v)
+{
+	struct sptree_iterator *iter = s->private;
+	struct sptree_node *node = iter->node;
+
+	if (node->mapping)
+		seq_printf(s, "%lx\n", node->start);
+
+	return 0;
+}
+
+static void *dump_po_next(struct seq_file *s, void *v, loff_t *pos)
+{
+	struct sptree_iterator *iter = s->private;
+
+	sptree_iter_next_po(iter);
+	if (iter->node == NULL)
+		return NULL;
+
+	(*pos)++;
+	return iter;
+}
+
+static void dump_po_stop(struct seq_file *s, void *v)
+{
+}
+
+static struct seq_operations dump_po_seq_ops = {
+	.start = dump_po_start,
+	.next = dump_po_next,
+	.show = dump_po_show,
+	.stop = dump_po_stop,
+};
+
+int dump_po_open(struct inode *inode, struct file *file)
+{
+	// can't seek on a tree without a walk & ignore
+	file->f_mode &= ~FMODE_LSEEK;
+
+	return seq_open(file, &dump_po_seq_ops);
 }
 
 static struct file_operations insert_map_ops = {
@@ -372,9 +507,27 @@ static struct file_operations rol_map_ops = {
 	.write = rol_map,
 };
 
-static struct file_operations dump_map_ops = {
+static struct file_operations rrl_map_ops = {
 	.owner = THIS_MODULE,
-	.open = dump_open,
+	.write = rrl_map,
+};
+
+static struct file_operations rlr_map_ops = {
+	.owner = THIS_MODULE,
+	.write = rlr_map,
+};
+
+static struct file_operations dump_gv_map_ops = {
+	.owner = THIS_MODULE,
+	.open = dump_gv_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = seq_release_private
+};
+
+static struct file_operations dump_po_map_ops = {
+	.owner = THIS_MODULE,
+	.open = dump_po_open,
 	.read = seq_read,
 	.llseek = seq_lseek,
 	.release = seq_release_private
@@ -382,48 +535,50 @@ static struct file_operations dump_map_ops = {
 
 static int __init sptree_debugfs_init(void)
 {
-	int result;
+	static struct dentry *result;
 
 	debugfs_dir = debugfs_create_dir("sptree", NULL);
 	if (IS_ERR(debugfs_dir))
 		return PTR_ERR(debugfs_dir);
 
-	insert_file = debugfs_create_file("insert", S_IWUGO, debugfs_dir, NULL, &insert_map_ops);
-	if (IS_ERR(insert_file)) {
-		result = PTR_ERR(insert_file);
+	result = debugfs_create_file("insert", S_IWUGO, debugfs_dir, NULL, &insert_map_ops);
+	if (IS_ERR(result))
 		goto error;
-	}
 
-	delete_file = debugfs_create_file("delete", S_IWUGO, debugfs_dir, NULL, &delete_map_ops);
-	if (IS_ERR(delete_file)) {
-		result = PTR_ERR(delete_file);
+	result = debugfs_create_file("delete", S_IWUGO, debugfs_dir, NULL, &delete_map_ops);
+	if (IS_ERR(result))
 		goto error;
-	}
 
-	ror_file = debugfs_create_file("ror", S_IWUGO, debugfs_dir, NULL, &ror_map_ops);
-	if (IS_ERR(ror_file)) {
-		result = PTR_ERR(ror_file);
+	result = debugfs_create_file("ror", S_IWUGO, debugfs_dir, NULL, &ror_map_ops);
+	if (IS_ERR(result))
 		goto error;
-	}
 
-	rol_file = debugfs_create_file("rol", S_IWUGO, debugfs_dir, NULL, &rol_map_ops);
-	if (IS_ERR(rol_file)) {
-		result = PTR_ERR(rol_file);
+	result = debugfs_create_file("rol", S_IWUGO, debugfs_dir, NULL, &rol_map_ops);
+	if (IS_ERR(result))
 		goto error;
-	}
 
-	dump_file = debugfs_create_file("dump", S_IRUGO, debugfs_dir, NULL, &dump_map_ops);
-	if (IS_ERR(dump_file)) {
-		result = PTR_ERR(dump_file);
+	result = debugfs_create_file("rrl", S_IWUGO, debugfs_dir, NULL, &rrl_map_ops);
+	if (IS_ERR(result))
 		goto error;
-	}
+
+	result = debugfs_create_file("rlr", S_IWUGO, debugfs_dir, NULL, &rlr_map_ops);
+	if (IS_ERR(result))
+		goto error;
+
+	result = debugfs_create_file("dump_gv", S_IRUGO, debugfs_dir, NULL, &dump_gv_map_ops);
+	if (IS_ERR(result))
+		goto error;
+
+	result = debugfs_create_file("dump_po", S_IRUGO, debugfs_dir, NULL, &dump_po_map_ops);
+	if (IS_ERR(result))
+		goto error;
 
 	return 0;
 
 error:
 	debugfs_remove_recursive(debugfs_dir);
 
-	return result;
+	return PTR_ERR(result);
 }
 
 static int __init sptree_test_init(void)

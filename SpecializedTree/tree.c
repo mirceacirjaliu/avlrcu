@@ -3,6 +3,7 @@
 
 #include <linux/module.h>
 #include <linux/types.h>
+#include <linux/kernel.h>
 #include <linux/string.h>
 #include <linux/slab.h>
 #include <linux/rcupdate.h>
@@ -27,7 +28,6 @@ int sptree_init(struct sptree_root *root, unsigned long start, size_t length)
 
 	return 0;
 }
-
 
 // recursive post-order free function
 static void postorder_free(struct sptree_node *node)
@@ -54,6 +54,43 @@ void sptree_free(struct sptree_root *root)
 	postorder_free(tree);
 }
 
+
+
+// TODO: debug purposes only, remove once code is stable
+// checks the AVL condition for subtree depths
+static int validate_subtree_balancing(struct sptree_node *node)
+{
+	int left_depth = 0;
+	int right_depth = 0;
+	int diff;
+
+	if (node->left)
+		left_depth = validate_subtree_balancing(node->left);
+
+	if (node->right)
+		right_depth = validate_subtree_balancing(node->right);
+
+	diff = right_depth - left_depth;
+
+	// check for balance outside [-1..1]
+	if (diff < -1 || diff > 1)
+		pr_warn("%s: excessive balancing on "NODE_FMT", left %d, right %d\n",
+			__func__, NODE_ARG(node), left_depth, right_depth);
+
+	// check if the algorithm computed the balance right
+	if (diff != node->balancing)
+		pr_warn("%s: wrong balance factor on "NODE_FMT", left %d, right %d\n",
+			__func__, NODE_ARG(node), left_depth, right_depth);
+
+	// return the depth of the subtree rooted at node
+	return max(left_depth, right_depth) + 1;
+}
+
+static void validate_avl_balancing(struct sptree_root *root)
+{
+	if (root->root)
+		validate_subtree_balancing(root->root);
+}
 
 
 
@@ -94,7 +131,7 @@ struct sptree_node *sptree_search(struct sptree_root *root, unsigned long addr)
 
 
 
-void sptree_iter_first(struct sptree_root *root, struct sptree_iterator *iter)
+void sptree_iter_first_io(struct sptree_root *root, struct sptree_iterator *iter)
 {
 	if (unlikely(root->root == NULL)) {
 		iter->node = NULL;
@@ -105,10 +142,10 @@ void sptree_iter_first(struct sptree_root *root, struct sptree_iterator *iter)
 	iter->node = root->root;
 	iter->state = ITER_UP;
 
-	sptree_iter_next(iter);
+	sptree_iter_next_io(iter);
 }
 
-void sptree_iter_next(struct sptree_iterator *iter)
+void sptree_iter_next_io(struct sptree_iterator *iter)
 {
 	struct sptree_node *next;
 
@@ -136,6 +173,8 @@ void sptree_iter_next(struct sptree_iterator *iter)
 				goto back_to_parent;		// no right subtree, must go up
 			}
 			break;
+			// TODO: the else branch can be allowed to fallback to the ITER_RIGHT case
+			// TODO: just move the break to the if branch
 
 		case ITER_RIGHT:				// comes from right subtree
 back_to_parent:
@@ -149,6 +188,7 @@ back_to_parent:
 				iter->state = ITER_HANDLED;	// directly handle the node
 				return;
 			} else {
+				// we may be here coming from ITER_HANDLED case
 				iter->state = ITER_RIGHT;	// right subtree has been handled
 			}
 			break;
@@ -160,6 +200,75 @@ back_to_parent:
 		}
 	}
 }
+
+
+void sptree_iter_first_po(struct sptree_root *root, struct sptree_iterator *iter)
+{
+	if (unlikely(root->root == NULL)) {
+		iter->node = NULL;
+		iter->state = ITER_DONE;
+		return;
+	}
+
+	iter->node = root->root;
+	iter->state = ITER_UP;
+
+	sptree_iter_next_po(iter);
+}
+
+void sptree_iter_next_po(struct sptree_iterator *iter)
+{
+	struct sptree_node *next;
+
+	while (iter->node) {
+		switch (iter->state)
+		{
+		case ITER_UP:
+			iter->state = ITER_HANDLED;
+			return;
+			// TODO: this state can be optimized with ITER_HANDLED
+
+		case ITER_HANDLED:
+			next = READ_ONCE(iter->node->left);
+			if (next) {
+				iter->node = next;
+				iter->state = ITER_UP;
+				break;
+			}
+
+		case ITER_LEFT:
+			next = READ_ONCE(iter->node->right);
+			if (next) {
+				iter->node = next;
+				iter->state = ITER_UP;
+				break;
+			}
+
+		case ITER_RIGHT:
+			next = READ_ONCE(iter->node->parent);	// may contain L/R flags
+			iter->node = strip_flag(next);		// goes up anyway
+
+			if (is_root(next)) {
+				iter->state = ITER_DONE;
+				return;
+			} else if (is_left_child(next)) {
+				iter->state = ITER_LEFT;
+				break;
+			} else {
+				iter->state = ITER_RIGHT;
+				break;
+			}
+
+		default:
+			pr_warn("%s: unhandled iterator state\n", __func__);
+			iter->node = NULL;			// cancels iteration
+			return;
+		}
+
+	}
+}
+
+
 
 // root = the node that is parent of this subtree, that is replaced with its left child
 // proot = pointer to this node (root->root / parent->left / parent->right)
@@ -391,7 +500,6 @@ static struct sptree_node *rotate_left_right(struct sptree_node *root, struct sp
 
 	return new_root;
 }
-
 // TODO: the compound rotations are made up of simple rotations, but affect the
 // balance factors in different ways
 // TODO: separate the rotations from the balance factors fixing
@@ -443,6 +551,9 @@ int sptree_ror(struct sptree_root *root, unsigned long addr)
 		return -ENOMEM;
 	}
 
+	// TODO: remove once code stable
+	validate_avl_balancing(root);
+
 	return 0;
 }
 
@@ -486,10 +597,123 @@ int sptree_rol(struct sptree_root *root, unsigned long addr)
 		return -ENOMEM;
 	}
 
+	// TODO: remove once code stable
+	validate_avl_balancing(root);
+
 	return 0;
 }
 
-static int retrace(struct sptree_root *root, struct sptree_node *node)
+int sptree_rrl(struct sptree_root *root, unsigned long addr)
+{
+	struct sptree_node *target, *parent;
+	struct sptree_node **ptarget;
+	struct sptree_node *subtree;
+
+	if (addr & ~PAGE_MASK)
+		return -EINVAL;
+	if (addr < root->start || addr > root->start + root->length - PAGE_SIZE)
+		return -EINVAL;
+
+	target = search(root, addr);
+	if (!target) {
+		pr_err("couldn't find subtree rooted at %lx\n", addr);
+		return -ENOENT;
+	}
+
+	// validate the node
+	if (!target->mapping) {
+		pr_err("found node "NODE_FMT", not a mapping\n", NODE_ARG(target));
+		return -EINVAL;
+	}
+	if (!target->right) {
+		pr_err("node too low\n");
+		return -EINVAL;
+	}
+	if (!target->right->mapping) {
+		pr_err("pivot not a mapping\n");
+		return -EINVAL;
+	}
+	if (!target->right->left) {
+		pr_err("node too low\n");
+		return -EINVAL;
+	}
+	if (!target->right->left->mapping) {
+		pr_err("pivot not a mapping\n");
+		return -EINVAL;
+	}
+
+	// may contain L/R flags or NULL
+	parent = READ_ONCE(target->parent);
+	ptarget = get_pnode(root, parent);
+
+	subtree = rotate_right_left(target, ptarget);
+	if (!subtree) {
+		pr_err("no mem?\n");
+		return -ENOMEM;
+	}
+
+	// TODO: remove once code stable
+	validate_avl_balancing(root);
+
+	return 0;
+}
+
+int sptree_rlr(struct sptree_root *root, unsigned long addr)
+{
+	struct sptree_node *target, *parent;
+	struct sptree_node **ptarget;
+	struct sptree_node *subtree;
+
+	if (addr & ~PAGE_MASK)
+		return -EINVAL;
+	if (addr < root->start || addr > root->start + root->length - PAGE_SIZE)
+		return -EINVAL;
+
+	target = search(root, addr);
+	if (!target) {
+		pr_err("couldn't find subtree rooted at %lx\n", addr);
+		return -ENOENT;
+	}
+
+	// validate the node
+	if (!target->mapping) {
+		pr_err("found node "NODE_FMT", not a mapping\n", NODE_ARG(target));
+		return -EINVAL;
+	}
+	if (!target->left) {
+		pr_err("node too low\n");
+		return -EINVAL;
+	}
+	if (!target->left->mapping) {
+		pr_err("pivot not a mapping\n");
+		return -EINVAL;
+	}
+	if (!target->left->right) {
+		pr_err("node too low\n");
+		return -EINVAL;
+	}
+	if (!target->left->right->mapping) {
+		pr_err("pivot not a mapping\n");
+		return -EINVAL;
+	}
+
+	// may contain L/R flags or NULL
+	parent = READ_ONCE(target->parent);
+	ptarget = get_pnode(root, parent);
+
+	subtree = rotate_left_right(target, ptarget);
+	if (!subtree) {
+		pr_err("no mem?\n");
+		return -ENOMEM;
+	}
+
+	// TODO: remove once code stable
+	validate_avl_balancing(root);
+
+	return 0;
+}
+
+static int insert_retrace(struct sptree_root *root, struct sptree_node *node)
 {
 	struct sptree_node *parent, *gparent;
 	struct sptree_node **pparent;
@@ -679,7 +903,10 @@ int sptree_insert(struct sptree_root *root, unsigned long addr)
 	WRITE_ONCE(*ptarget, subtree);
 
 	// rebalance tree
-	retrace(root, subtree);
+	insert_retrace(root, subtree);
+
+	// TODO: remove once code stable
+	validate_avl_balancing(root);
 
 	// finally free the replaced node
 	kfree_rcu(target, rcu);
