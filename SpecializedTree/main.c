@@ -171,6 +171,21 @@ static ssize_t delete_map(struct file *file, const char __user *data, size_t cou
 	return count;
 }
 
+static ssize_t clear_map(struct file *file, const char __user *data, size_t count, loff_t *offs)
+{
+	int result;
+
+	sptree_free(&sptree_range);
+
+	// create the sptree_range: 4KB - 1MB
+	result = sptree_init(&sptree_range, 4 * KB, 1 * MB - 4 * KB);
+	if (result)
+		pr_warn("%s: failed reinit!!\n", __func__);
+
+	*offs += count;
+	return count;
+}
+
 static ssize_t ror_map(struct file *file, const char __user *data, size_t count, loff_t *offs)
 {
 	unsigned long value;
@@ -497,6 +512,11 @@ static struct file_operations delete_map_ops = {
 	.write = delete_map,
 };
 
+static struct file_operations clear_map_ops = {
+	.owner = THIS_MODULE,
+	.write = clear_map,
+};
+
 static struct file_operations ror_map_ops = {
 	.owner = THIS_MODULE,
 	.write = ror_map,
@@ -549,6 +569,10 @@ static int __init sptree_debugfs_init(void)
 	if (IS_ERR(result))
 		goto error;
 
+	result = debugfs_create_file("clear", S_IWUGO, debugfs_dir, NULL, &clear_map_ops);
+	if (IS_ERR(result))
+		goto error;
+
 	result = debugfs_create_file("ror", S_IWUGO, debugfs_dir, NULL, &ror_map_ops);
 	if (IS_ERR(result))
 		goto error;
@@ -569,7 +593,7 @@ static int __init sptree_debugfs_init(void)
 	if (IS_ERR(result))
 		goto error;
 
-	result = debugfs_create_file("dump_po", S_IRUGO, debugfs_dir, NULL, &dump_po_map_ops);
+	result = debugfs_create_file("dump_map", S_IRUGO, debugfs_dir, NULL, &dump_po_map_ops);
 	if (IS_ERR(result))
 		goto error;
 

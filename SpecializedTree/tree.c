@@ -890,8 +890,9 @@ int sptree_insert(struct sptree_root *root, unsigned long addr)
 	WRITE_ONCE(subtree->parent, parent);
 	WRITE_ONCE(*ptarget, subtree);
 
-	// rebalance tree
-	insert_retrace(root, subtree);
+	// rebalance tree if the subtree has depth != 1
+	if (!is_leaf(subtree))
+		insert_retrace(root, subtree);
 
 	// TODO: remove once code stable
 	validate_avl_balancing(root);
