@@ -156,28 +156,23 @@ void sptree_iter_next_io(struct sptree_iterator *iter)
 		switch (iter->state) {
 		case ITER_UP:					// comes from parent...
 			next = READ_ONCE(iter->node->left);	// goes down left subtree
-			if (next)
+			if (next) {
 				iter->node = next;		// state stays the same
-			else {
+				break;
+			} else {
 				iter->state = ITER_HANDLED;	// no left subtree, will handle the node
 				return;
 			}
-			break;
 
 		case ITER_HANDLED:				// node has just been handled...
 			next = READ_ONCE(iter->node->right);	// goes down right subtree
 			if (next) {
 				iter->node = next;
 				iter->state = ITER_UP;
-			} else {
-				goto back_to_parent;		// no right subtree, must go up
-			}
-			break;
-			// TODO: the else branch can be allowed to fallback to the ITER_RIGHT case
-			// TODO: just move the break to the if branch
+				break;
+			} // else fallback to the next case
 
-		case ITER_RIGHT:				// comes from right subtree
-back_to_parent:
+		case ITER_RIGHT:				// comes from right subtree / handled case
 			next = READ_ONCE(iter->node->parent);	// may contain L/R flags
 			iter->node = strip_flag(next);		// goes up anyway
 
@@ -190,8 +185,8 @@ back_to_parent:
 			} else {
 				// we may be here coming from ITER_HANDLED case
 				iter->state = ITER_RIGHT;	// right subtree has been handled
+				break;
 			}
-			break;
 
 		default:
 			pr_warn("%s: unhandled iterator state\n", __func__);
@@ -211,9 +206,7 @@ void sptree_iter_first_po(struct sptree_root *root, struct sptree_iterator *iter
 	}
 
 	iter->node = root->root;
-	iter->state = ITER_UP;
-
-	sptree_iter_next_po(iter);
+	iter->state = ITER_HANDLED;
 }
 
 void sptree_iter_next_po(struct sptree_iterator *iter)
@@ -223,25 +216,20 @@ void sptree_iter_next_po(struct sptree_iterator *iter)
 	while (iter->node) {
 		switch (iter->state)
 		{
-		case ITER_UP:
-			iter->state = ITER_HANDLED;
-			return;
-			// TODO: this state can be optimized with ITER_HANDLED
-
 		case ITER_HANDLED:
 			next = READ_ONCE(iter->node->left);
 			if (next) {
 				iter->node = next;
-				iter->state = ITER_UP;
-				break;
+				iter->state = ITER_HANDLED;
+				return;
 			}
 
 		case ITER_LEFT:
 			next = READ_ONCE(iter->node->right);
 			if (next) {
 				iter->node = next;
-				iter->state = ITER_UP;
-				break;
+				iter->state = ITER_HANDLED;
+				return;
 			}
 
 		case ITER_RIGHT:
