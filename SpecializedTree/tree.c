@@ -724,8 +724,7 @@ static struct sptree_node *rotate_right_retrace(struct sptree_node *root, struct
 	if (pivot->balancing == 0) {
 		new_root->balancing = 1;
 		new_pivot->balancing = -1;
-	}
-	else {
+	} else {
 		new_pivot->balancing = 0;
 		new_root->balancing = 0;
 	}
@@ -767,8 +766,7 @@ static struct sptree_node *rotate_left_retrace(struct sptree_node *root, struct 
 	if (pivot->balancing == 0) {
 		new_root->balancing = 1;
 		new_pivot->balancing = -1;
-	}
-	else {
+	} else {
 		new_pivot->balancing = 0;
 		new_root->balancing = 0;
 	}
@@ -814,15 +812,12 @@ static struct sptree_node *rotate_right_left_retrace(struct sptree_node *root, s
 		new_left->balancing = -1;
 		new_right->balancing = 0;
 	}
-	else {
-		if (left->balancing == 0) {
-			new_left->balancing = 0;
-			new_right->balancing = 0;
-		}
-		else {
-			new_left->balancing = 0;
-			new_right->balancing = 1;
-		}
+	else if (left->balancing == 0) {
+		new_left->balancing = 0;
+		new_right->balancing = 0;
+	} else {
+		new_left->balancing = 0;
+		new_right->balancing = 1;
 	}
 	new_root->balancing = 0;
 
@@ -864,19 +859,16 @@ static struct sptree_node *rotate_left_right_retrace(struct sptree_node *root, s
 
 	// fix balance factors
 	if (right->balancing > 0) {
-		new_right->balancing = -1;
+		new_left->balancing = -1;
+		new_right->balancing = 0;
+	} else  if (right->balancing == 0) {
 		new_left->balancing = 0;
+		new_right->balancing = 0;
+	} else {
+		new_left->balancing = 0;
+		new_right->balancing = 1;
 	}
-	else {
-		if (right->balancing == 0) {
-			new_right->balancing = 0;
-			new_left->balancing = 0;
-		}
-		else {
-			new_right->balancing = 0;
-			new_left->balancing = 1;
-		}
-	}
+
 	new_root->balancing = 0;
 
 	pr_info("%s: rotated left-right, new root is "NODE_FMT"\n",
