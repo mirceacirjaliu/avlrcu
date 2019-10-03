@@ -370,9 +370,9 @@ static int dump_gv_show(struct seq_file *s, void *v)
 	struct sptree_node *left = node->left;
 	struct sptree_node *right = node->right;
 
-	seq_printf(s, "\tn%lx [label=\"%lx - %lx\\n%c\", style=filled, fillcolor=%s]\n",
+	seq_printf(s, "\tn%lx [label=\"%lx - %lx\\n%d\", style=filled, fillcolor=%s]\n",
 		(unsigned long)node, node->start, node->start + node->length,
-		node_balancing(node), node->mapping ? "red" : "green");
+		node->balancing, node->mapping ? "red" : "green");
 
 	if (left)
 		seq_printf(s, "\tn%lx -> n%lx [tailport=w]\n",

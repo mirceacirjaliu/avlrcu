@@ -31,6 +31,11 @@ struct sptree_root {
 
 #define PARENT_FLAGS 1
 
+static inline bool is_mapping(struct sptree_node *node)
+{
+	return node->mapping;
+}
+
 static inline bool is_leaf(struct sptree_node *node)
 {
 	return node->left == NULL && node->right == NULL;
@@ -88,8 +93,8 @@ static inline char node_balancing(const struct sptree_node *node)
 	}
 }
 
-#define NODE_FMT "(%lx-%lx,%c)"
-#define NODE_ARG(__node) (__node)->start, (__node)->start + (__node)->length, node_balancing(__node)
+#define NODE_FMT "(%lx-%lx,%d)"
+#define NODE_ARG(__node) (__node)->start, (__node)->start + (__node)->length, (__node)->balancing
 
 
 
@@ -130,6 +135,17 @@ extern void sptree_iter_next_po(struct sptree_iterator *iter);
 
 extern int sptree_init(struct sptree_root *root, unsigned long start, size_t length);
 extern void sptree_free(struct sptree_root *root);
+
+// helper for operations on an address
+static inline bool address_valid(struct sptree_root *root, unsigned long addr)
+{
+	if (addr & ~PAGE_MASK)
+		return false;
+	if (addr < root->start || addr > root->start + root->length - PAGE_SIZE)
+		return false;
+
+	return true;
+}
 
 // these 2 must be protected by a lock
 extern int sptree_insert(struct sptree_root *root, unsigned long addr);

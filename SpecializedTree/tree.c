@@ -74,12 +74,12 @@ static int validate_subtree_balancing(struct sptree_node *node)
 
 	// check for balance outside [-1..1]
 	if (diff < -1 || diff > 1)
-		pr_warn("%s: excessive balancing on "NODE_FMT", left %d, right %d\n",
+		pr_warn("%s: excessive balancing on "NODE_FMT", left depth %d, right depth %d\n",
 			__func__, NODE_ARG(node), left_depth, right_depth);
 
 	// check if the algorithm computed the balance right
 	if (diff != node->balancing)
-		pr_warn("%s: wrong balance factor on "NODE_FMT", left %d, right %d\n",
+		pr_warn("%s: wrong balance factor on "NODE_FMT", left depth %d, right depth %d\n",
 			__func__, NODE_ARG(node), left_depth, right_depth);
 
 	// return the depth of the subtree rooted at node
@@ -257,10 +257,20 @@ void sptree_iter_next_po(struct sptree_iterator *iter)
 }
 
 
-
-// root = the node that is parent of this subtree, that is replaced with its left child
-// proot = pointer to this node (root->root / parent->left / parent->right)
-static struct sptree_node *rotate_right(struct sptree_node *root, struct sptree_node **proot)
+/**
+ * rotate_right_rcu() - core of the rotate_right_...() family
+ * @root:	The node rooting a subtree
+ * @proot:	Address of pointer to @root (for changing parent)
+ *		(root->root / parent->left / parent->right)
+ *
+ * Rotates the subtree rooted by @root in a RCU-safe manner.
+ * The rotation does not break search or in-order walk operations.
+ * Does not do balance factor fixing.
+ * Can fail if allocation fails, but the tree is not altered.
+ *
+ * Returns pointer to the new root of the subtree or NULL.
+ */
+static struct sptree_node *rotate_right_rcu(struct sptree_node *root, struct sptree_node **proot)
 {
 	struct sptree_node *pivot = root->left;
 	struct sptree_node *new_root;
@@ -309,27 +319,27 @@ static struct sptree_node *rotate_right(struct sptree_node *root, struct sptree_
 	if (root->right)
 		WRITE_ONCE(root->right->parent, make_right(new_pivot));
 
-	// fix balance factors
-	if (pivot->balancing == 0) {
-		new_root->balancing = 1;
-		new_pivot->balancing = -1;
-	} else {
-		new_pivot->balancing = 0;
-		new_root->balancing = 0;
-	}
-
 	// free old nodes
 	kfree_rcu(root, rcu);
 	kfree_rcu(pivot, rcu);
 
-	pr_info("%s: rotated right, new root is "NODE_FMT"\n",
-		__func__, NODE_ARG(new_root));
-
 	return new_root;
 }
 
-// same as above, changed direction
-static struct sptree_node *rotate_left(struct sptree_node *root, struct sptree_node **proot)
+/**
+ * rotate_left_rcu() - core of the rotate_left_...() family
+ * @root:	The node rooting a subtree
+ * @proot:	Address of pointer to @root (for changing parent)
+ *		(root->root / parent->left / parent->right)
+ *
+ * Rotates the subtree rooted by @root in a RCU-safe manner.
+ * The rotation does not break search or in-order walk operations.
+ * Does not do balance factor fixing.
+ * Can fail if allocation fails, but the tree is not altered.
+ *
+ * Returns pointer to the new root of the subtree or NULL.
+ */
+static struct sptree_node *rotate_left_rcu(struct sptree_node *root, struct sptree_node **proot)
 {
 	struct sptree_node *pivot = root->right;
 	struct sptree_node *new_root;
@@ -378,165 +388,142 @@ static struct sptree_node *rotate_left(struct sptree_node *root, struct sptree_n
 	if (pivot->right)
 		WRITE_ONCE(pivot->right->parent, make_right(new_root));
 
-	// fix balance factors
-	if (pivot->balancing == 0) {
-		new_root->balancing = 1;
-		new_pivot->balancing = -1;
-	} else {
-		new_pivot->balancing = 0;
-		new_root->balancing = 0;
-	}
-
 	// free old nodes
 	kfree_rcu(root, rcu);
 	kfree_rcu(pivot, rcu);
 
-	pr_info("%s: rotated left, new root is "NODE_FMT"\n",
-		__func__, NODE_ARG(new_root));
-
 	return new_root;
 }
 
-static struct sptree_node *rotate_right_left(struct sptree_node *root, struct sptree_node **proot)
+/**
+ * rotate_right_left_rcu() - compound rotation
+ * @root:	The node rooting a subtree
+ * @proot:	Address of pointer to @root (for changing parent)
+ *		(root->root / parent->left / parent->right)
+ *
+ * Rotates the subtree rooted by @root in a RCU-safe manner.
+ * The rotation does not break search or in-order walk operations.
+ * Does not do balance factor fixing.
+ * The rotation can fail in the middle if the second rotation fails.
+ * In this case the tree remains unbalanced and we must shut down.
+ *
+ * Returns pointer to the new root of the subtree or NULL.
+ */
+static struct sptree_node *rotate_right_left_rcu(struct sptree_node *root, struct sptree_node **proot)
 {
 	// root = X
 	struct sptree_node *right = root->right;	// Z
 	struct sptree_node **pright = &root->right;
-	struct sptree_node *left = right->left;		// Y
+	//struct sptree_node *left = right->left;		// Y
 	struct sptree_node *new_root;
-	struct sptree_node *new_left;			// new X
-	struct sptree_node *new_right;			// new Z
 
 	pr_info("%s: rotate right-left at "NODE_FMT"\n", __func__, NODE_ARG(root));
 
 	// rotate right on Z
-	if (!rotate_right(right, pright))
+	if (!rotate_right_rcu(right, pright))
 		return NULL;
 
 	// rotate left on X
-	new_root = rotate_left(root, proot);
+	new_root = rotate_left_rcu(root, proot);
 	if (!new_root)
 		return NULL;
-
-	new_left = new_root->left;
-	new_right = new_root->right;
-
-	// fix balance factors
-	if (left->balancing > 0) {
-		new_left->balancing = -1;
-		new_right->balancing = 0;
-	} else {
-		if (left->balancing == 0) {
-			new_left->balancing = 0;
-			new_right->balancing = 0;
-		} else {
-			new_left->balancing = 0;
-			new_right->balancing = 1;
-		}
-	}
-
-	new_root->balancing = 0;
-
-	pr_info("%s: rotated right-left, new root is "NODE_FMT"\n",
-		__func__, NODE_ARG(new_root));
 
 	return new_root;
 }
 
-static struct sptree_node *rotate_left_right(struct sptree_node *root, struct sptree_node **proot)
+/**
+ * rotate_left_right_rcu() - compound rotation
+ * @root:	The node rooting a subtree
+ * @proot:	Address of pointer to @root (for changing parent)
+ *		(root->root / parent->left / parent->right)
+ *
+ * Rotates the subtree rooted by @root in a RCU-safe manner.
+ * The rotation does not break search or in-order walk operations.
+ * Does not do balance factor fixing.
+ * The rotation can fail in the middle if the second rotation fails.
+ * In this case the tree remains unbalanced and we must shut down.
+ *
+ * Returns pointer to the new root of the subtree or NULL.
+ */
+static struct sptree_node *rotate_left_right_rcu(struct sptree_node *root, struct sptree_node **proot)
 {
 	// root = X
 	struct sptree_node *left = root->left;		// Z
 	struct sptree_node **pleft = &root->left;
-	struct sptree_node *right = left->right;	// Y
+	//struct sptree_node *right = left->right;	// Y
 	struct sptree_node *new_root;
-	struct sptree_node *new_left;			// new Z
-	struct sptree_node *new_right;			// new X
 
 	pr_info("%s: rotate left-right at "NODE_FMT"\n", __func__, NODE_ARG(root));
 
 	// rotate left on Z
-	if (!rotate_left(left, pleft))
+	if (!rotate_left_rcu(left, pleft))
 		return NULL;
 
 	// rotate right on X
-	new_root = rotate_right(root, proot);
+	new_root = rotate_right_rcu(root, proot);
 	if (!new_root)
 		return NULL;
 
-	new_left = new_root->left;
-	new_right = new_root->right;
-
-	// fix balance factors
-	if (right->balancing > 0) {
-		new_right->balancing = -1;
-		new_left->balancing = 0;
-	} else {
-		if (right->balancing == 0) {
-			new_right->balancing = 0;
-			new_left->balancing = 0;
-		} else {
-			new_right->balancing = 0;
-			new_left->balancing = 1;
-		}
-	}
-
-	new_root->balancing = 0;
-
-	pr_info("%s: rotated left-right, new root is "NODE_FMT"\n",
-		__func__, NODE_ARG(new_root));
-
 	return new_root;
 }
-// TODO: the compound rotations are made up of simple rotations, but affect the
-// balance factors in different ways
-// TODO: separate the rotations from the balance factors fixing
-
-// TODO: if one of the simple rotations fails in a compound rotation, the tree is
-// left in an unbalanced state
-// TODO: better implement this in a allocate-replace fashion and try to roll back
-// the changes to the tree in case of failure
 
 
 int sptree_ror(struct sptree_root *root, unsigned long addr)
 {
 	struct sptree_node *target, *parent;
 	struct sptree_node **ptarget;
-	struct sptree_node *subtree;
+	struct sptree_node *pivot;
+	struct sptree_node *new_root;
+	struct sptree_node *new_pivot;
 
-	if (addr & ~PAGE_MASK)
-		return -EINVAL;
-	if (addr < root->start || addr > root->start + root->length - PAGE_SIZE)
+	if (!address_valid(root, addr))
 		return -EINVAL;
 
 	target = search(root, addr);
-	if (!target) {
-		pr_err("couldn't find subtree rooted at %lx\n", addr);
-		return -ENOENT;
+	BUG_ON(!target);
+	pivot = target->left;
+
+	// validate nodes
+	if (!is_mapping(target)) {
+		pr_err("%s: found root "NODE_FMT", not a mapping\n", __func__, NODE_ARG(target));
+		return -EINVAL;
+	}
+	if (!pivot) {
+		pr_err("%s: we don't have a pivot for "NODE_FMT"\n", __func__, NODE_ARG(target));
+		return -EINVAL;
+	}
+	if (!is_mapping(pivot)) {
+		pr_err("%s: pivot "NODE_FMT" not a mapping\n", __func__, NODE_ARG(pivot));
+		return -EINVAL;
 	}
 
-	// validate the node
-	if (!target->mapping) {
-		pr_err("found node "NODE_FMT", not a mapping\n", NODE_ARG(target));
-		return -EINVAL;
-	}
-	if (!target->left) {
-		pr_err("node too low\n");
-		return -EINVAL;
-	}
-	if (!target->left->mapping) {
-		pr_err("pivot not a mapping\n");
-		return -EINVAL;
-	}
+	// validate balancing
+	//if (target->balancing > 0) {
+	//	pr_err("%s: root "NODE_FMT" already right-heavy, can't do\n", __func__, NODE_ARG(target));
+	//	return -EINVAL;
+	//}
+	//if (pivot->balancing > 0) {
+	//	pr_err("%s: pivot "NODE_FMT" already right-heavy, can't do\n", __func__, NODE_ARG(target));
+	//	return -EINVAL;
+	//}
 
 	// may contain L/R flags or NULL
 	parent = READ_ONCE(target->parent);
 	ptarget = get_pnode(root, parent);
 
-	subtree = rotate_right(target, ptarget);
-	if (!subtree) {
-		pr_err("no mem?\n");
+	new_root = rotate_right_rcu(target, ptarget);
+	if (!new_root)
 		return -ENOMEM;
+
+	new_pivot = new_root->right;
+
+	// fix balance factors
+	if (pivot->balancing < 0) {
+		new_root->balancing = target->balancing + pivot->balancing + 3;
+		new_pivot->balancing = target->balancing + 2;
+	} else {
+		new_root->balancing = target->balancing + pivot->balancing + 2;
+		new_pivot->balancing = target->balancing + 1;
 	}
 
 	// TODO: remove once code stable
@@ -549,40 +536,58 @@ int sptree_rol(struct sptree_root *root, unsigned long addr)
 {
 	struct sptree_node *target, *parent;
 	struct sptree_node **ptarget;
-	struct sptree_node *subtree;
+	struct sptree_node *pivot;
+	struct sptree_node *new_root;
+	struct sptree_node *new_pivot;
 
-	if (addr & ~PAGE_MASK)
-		return -EINVAL;
-	if (addr < root->start || addr > root->start + root->length - PAGE_SIZE)
+	if (!address_valid(root, addr))
 		return -EINVAL;
 
 	target = search(root, addr);
-	if (!target) {
-		pr_err("couldn't find subtree rooted at %lx\n", addr);
-		return -ENOENT;
+	BUG_ON(!target);
+	pivot = target->right;
+
+	// validate nodes
+	if (!is_mapping(target)) {
+		pr_err("%s: found root "NODE_FMT", not a mapping\n", __func__, NODE_ARG(target));
+		return -EINVAL;
+	}
+	if (!pivot) {
+		pr_err("%s: we don't have a pivot for "NODE_FMT"\n", __func__, NODE_ARG(target));
+		return -EINVAL;
+	}
+	if (!is_mapping(pivot)) {
+		pr_err("%s: pivot "NODE_FMT" not a mapping\n", __func__, NODE_ARG(pivot));
+		return -EINVAL;
 	}
 
-	if (!target->mapping) {
-		pr_err("found node "NODE_FMT", not a mapping\n", NODE_ARG(target));
-		return -EINVAL;
-	}
-	if (!target->right) {
-		pr_err("node too low\n");
-		return -EINVAL;
-	}
-	if (!target->right->mapping) {
-		pr_err("pivot not a mapping\n");
-		return -EINVAL;
-	}
+	// validate balancing
+	//if (target->balancing < 0) {
+	//	pr_err("%s: root "NODE_FMT" already left-heavy, can't do\n", __func__, NODE_ARG(target));
+	//	return -EINVAL;
+	//}
+	//if (pivot->balancing < 0) {
+	//	pr_err("%s: pivot "NODE_FMT" already left-heavy, can't do\n", __func__, NODE_ARG(target));
+	//	return -EINVAL;
+	//}
 
 	// may contain L/R flags or NULL
 	parent = READ_ONCE(target->parent);
 	ptarget = get_pnode(root, parent);
 
-	subtree = rotate_left(target, ptarget);
-	if (!subtree) {
-		pr_err("no mem?\n");
+	new_root = rotate_left_rcu(target, ptarget);
+	if (!new_root)
 		return -ENOMEM;
+
+	new_pivot = new_root->left;
+
+	// fix balance factors
+	if (pivot->balancing > 0) {
+		new_root->balancing = target->balancing + pivot->balancing - 3;
+		new_pivot->balancing = target->balancing - 2;
+	} else {
+		new_root->balancing = target->balancing + pivot->balancing - 2;
+		new_pivot->balancing = target->balancing - 1;
 	}
 
 	// TODO: remove once code stable
@@ -597,19 +602,14 @@ int sptree_rrl(struct sptree_root *root, unsigned long addr)
 	struct sptree_node **ptarget;
 	struct sptree_node *subtree;
 
-	if (addr & ~PAGE_MASK)
-		return -EINVAL;
-	if (addr < root->start || addr > root->start + root->length - PAGE_SIZE)
+	if (!address_valid(root, addr))
 		return -EINVAL;
 
 	target = search(root, addr);
-	if (!target) {
-		pr_err("couldn't find subtree rooted at %lx\n", addr);
-		return -ENOENT;
-	}
+	BUG_ON(!target);
 
 	// validate the node
-	if (!target->mapping) {
+	if (!is_mapping(target)) {
 		pr_err("found node "NODE_FMT", not a mapping\n", NODE_ARG(target));
 		return -EINVAL;
 	}
@@ -617,7 +617,7 @@ int sptree_rrl(struct sptree_root *root, unsigned long addr)
 		pr_err("node too low\n");
 		return -EINVAL;
 	}
-	if (!target->right->mapping) {
+	if (!is_mapping(target->right)) {
 		pr_err("pivot not a mapping\n");
 		return -EINVAL;
 	}
@@ -625,7 +625,7 @@ int sptree_rrl(struct sptree_root *root, unsigned long addr)
 		pr_err("node too low\n");
 		return -EINVAL;
 	}
-	if (!target->right->left->mapping) {
+	if (!is_mapping(target->right->left)) {
 		pr_err("pivot not a mapping\n");
 		return -EINVAL;
 	}
@@ -634,11 +634,9 @@ int sptree_rrl(struct sptree_root *root, unsigned long addr)
 	parent = READ_ONCE(target->parent);
 	ptarget = get_pnode(root, parent);
 
-	subtree = rotate_right_left(target, ptarget);
-	if (!subtree) {
-		pr_err("no mem?\n");
+	subtree = rotate_right_left_rcu(target, ptarget);
+	if (!subtree)
 		return -ENOMEM;
-	}
 
 	// TODO: remove once code stable
 	validate_avl_balancing(root);
@@ -652,19 +650,14 @@ int sptree_rlr(struct sptree_root *root, unsigned long addr)
 	struct sptree_node **ptarget;
 	struct sptree_node *subtree;
 
-	if (addr & ~PAGE_MASK)
-		return -EINVAL;
-	if (addr < root->start || addr > root->start + root->length - PAGE_SIZE)
+	if (!address_valid(root, addr))
 		return -EINVAL;
 
 	target = search(root, addr);
-	if (!target) {
-		pr_err("couldn't find subtree rooted at %lx\n", addr);
-		return -ENOENT;
-	}
+	BUG_ON(!target);
 
 	// validate the node
-	if (!target->mapping) {
+	if (!is_mapping(target)) {
 		pr_err("found node "NODE_FMT", not a mapping\n", NODE_ARG(target));
 		return -EINVAL;
 	}
@@ -672,7 +665,7 @@ int sptree_rlr(struct sptree_root *root, unsigned long addr)
 		pr_err("node too low\n");
 		return -EINVAL;
 	}
-	if (!target->left->mapping) {
+	if (!is_mapping(target->left)) {
 		pr_err("pivot not a mapping\n");
 		return -EINVAL;
 	}
@@ -680,7 +673,7 @@ int sptree_rlr(struct sptree_root *root, unsigned long addr)
 		pr_err("node too low\n");
 		return -EINVAL;
 	}
-	if (!target->left->right->mapping) {
+	if (!is_mapping(target->left->right)) {
 		pr_err("pivot not a mapping\n");
 		return -EINVAL;
 	}
@@ -689,11 +682,9 @@ int sptree_rlr(struct sptree_root *root, unsigned long addr)
 	parent = READ_ONCE(target->parent);
 	ptarget = get_pnode(root, parent);
 
-	subtree = rotate_left_right(target, ptarget);
-	if (!subtree) {
-		pr_err("no mem?\n");
+	subtree = rotate_left_right_rcu(target, ptarget);
+	if (!subtree)
 		return -ENOMEM;
-	}
 
 	// TODO: remove once code stable
 	validate_avl_balancing(root);
@@ -701,6 +692,208 @@ int sptree_rlr(struct sptree_root *root, unsigned long addr)
 	return 0;
 }
 
+
+/**
+ * rotate_right_retrace() - helper for retracing
+ * @root:	The node rooting a subtree
+ * @proot:	Address of pointer to @root (for changing parent)
+ *		(root->root / parent->left / parent->right)
+ *
+ * Called by ..._retrace() family after insertion/deletion.
+ * Assumes that the nodes operated on meet AVL tree invariants.
+ * No further checks are done.
+ *
+ * Returns pointer to the new root of the subtree or NULL.
+ */
+static struct sptree_node *rotate_right_retrace(struct sptree_node *root, struct sptree_node **proot)
+{
+	struct sptree_node *pivot = root->left;
+	struct sptree_node *new_root;
+	struct sptree_node *new_pivot;
+
+	pr_info("%s: rotate right at "NODE_FMT", pivot at "NODE_FMT"\n",
+		__func__, NODE_ARG(root), NODE_ARG(pivot));
+
+	new_root = rotate_right_rcu(root, proot);
+	if (!new_root)
+		return NULL;
+
+	new_pivot = new_root->right;
+
+	// fix balance factors
+	if (pivot->balancing == 0) {
+		new_root->balancing = 1;
+		new_pivot->balancing = -1;
+	}
+	else {
+		new_pivot->balancing = 0;
+		new_root->balancing = 0;
+	}
+
+	pr_info("%s: rotated right, new root is "NODE_FMT"\n",
+		__func__, NODE_ARG(new_root));
+
+	return new_root;
+}
+
+/**
+ * rotate_left_retrace() - helper for retracing
+ * @root:	The node rooting a subtree
+ * @proot:	Address of pointer to @root (for changing parent)
+ *		(root->root / parent->left / parent->right)
+ *
+ * Called by ..._retrace() family after insertion/deletion.
+ * Assumes that the nodes operated on meet AVL tree invariants.
+ * No further checks are done.
+ *
+ * Returns pointer to the new root of the subtree or NULL.
+ */
+static struct sptree_node *rotate_left_retrace(struct sptree_node *root, struct sptree_node **proot)
+{
+	struct sptree_node *pivot = root->right;
+	struct sptree_node *new_root;
+	struct sptree_node *new_pivot;
+
+	pr_info("%s: rotate left at "NODE_FMT", pivot at "NODE_FMT"\n",
+		__func__, NODE_ARG(root), NODE_ARG(pivot));
+
+	new_root = rotate_left_rcu(root, proot);
+	if (!new_root)
+		return NULL;
+
+	new_pivot = new_root->left;
+
+	// fix balance factors
+	if (pivot->balancing == 0) {
+		new_root->balancing = 1;
+		new_pivot->balancing = -1;
+	}
+	else {
+		new_pivot->balancing = 0;
+		new_root->balancing = 0;
+	}
+
+	pr_info("%s: rotated left, new root is "NODE_FMT"\n",
+		__func__, NODE_ARG(new_root));
+
+	return new_root;
+}
+
+/**
+ * rotate_right_left_retrace() - helper for retracing
+ * @root:	The node rooting a subtree
+ * @proot:	Address of pointer to @root (for changing parent)
+ *		(root->root / parent->left / parent->right)
+ *
+ * Called by ..._retrace() family after insertion/deletion.
+ * Assumes that the nodes operated on meet AVL tree invariants.
+ * No further checks are done.
+ *
+ * Returns pointer to the new root of the subtree or NULL.
+ */
+static struct sptree_node *rotate_right_left_retrace(struct sptree_node *root, struct sptree_node **proot)
+{
+	// root = X
+	struct sptree_node *right = root->right;	// Z
+	struct sptree_node *left = right->left;		// Y
+	struct sptree_node *new_root;			// new Y
+	struct sptree_node *new_left;			// new X
+	struct sptree_node *new_right;			// new Z
+
+	pr_info("%s: rotate right-left at "NODE_FMT"\n", __func__, NODE_ARG(root));
+
+	new_root = rotate_right_left_rcu(root, proot);
+	if (!new_root)
+		return NULL;
+
+	new_left = new_root->left;
+	new_right = new_root->right;
+
+	// fix balance factors
+	if (left->balancing > 0) {
+		new_left->balancing = -1;
+		new_right->balancing = 0;
+	}
+	else {
+		if (left->balancing == 0) {
+			new_left->balancing = 0;
+			new_right->balancing = 0;
+		}
+		else {
+			new_left->balancing = 0;
+			new_right->balancing = 1;
+		}
+	}
+	new_root->balancing = 0;
+
+	pr_info("%s: rotated right-left, new root is "NODE_FMT"\n",
+		__func__, NODE_ARG(new_root));
+
+	return new_root;
+}
+
+/**
+ * rotate_left_right_retrace() - helper for retracing
+ * @root:	The node rooting a subtree
+ * @proot:	Address of pointer to @root (for changing parent)
+ *		(root->root / parent->left / parent->right)
+ *
+ * Called by ..._retrace() family after insertion/deletion.
+ * Assumes that the nodes operated on meet AVL tree invariants.
+ * No further checks are done.
+ *
+ * Returns pointer to the new root of the subtree or NULL.
+ */
+static struct sptree_node *rotate_left_right_retrace(struct sptree_node *root, struct sptree_node **proot)
+{
+	// root = X
+	struct sptree_node *left = root->left;		// Z
+	struct sptree_node *right = left->right;	// Y
+	struct sptree_node *new_root;			// new Y
+	struct sptree_node *new_left;			// new Z
+	struct sptree_node *new_right;			// new X
+
+	pr_info("%s: rotate left-right at "NODE_FMT"\n", __func__, NODE_ARG(root));
+
+	new_root = rotate_left_right_rcu(root, proot);
+	if (!new_root)
+		return NULL;
+
+	new_left = new_root->left;
+	new_right = new_root->right;
+
+	// fix balance factors
+	if (right->balancing > 0) {
+		new_right->balancing = -1;
+		new_left->balancing = 0;
+	}
+	else {
+		if (right->balancing == 0) {
+			new_right->balancing = 0;
+			new_left->balancing = 0;
+		}
+		else {
+			new_right->balancing = 0;
+			new_left->balancing = 1;
+		}
+	}
+	new_root->balancing = 0;
+
+	pr_info("%s: rotated left-right, new root is "NODE_FMT"\n",
+		__func__, NODE_ARG(new_root));
+
+	return new_root;
+}
+
+/**
+ * insert_retrace() - retracing after insert
+ * @root:	Root of the tree
+ * @node:	Node where retracing begins
+ *
+ * Called after a node insertion increases the height of the (sub)tree.
+ *
+ * Returns 0 for success or -ENOMEM if rotations fail.
+ */
 static int insert_retrace(struct sptree_root *root, struct sptree_node *node)
 {
 	struct sptree_node *parent, *gparent;
@@ -729,9 +922,9 @@ static int insert_retrace(struct sptree_root *root, struct sptree_node *node)
 			if (parent->balancing < 0) {
 				// node is right-heavy
 				if (node->balancing > 0)
-					parent = rotate_left_right(parent, pparent);
+					parent = rotate_left_right_retrace(parent, pparent);
 				else
-					parent = rotate_right(parent, pparent);
+					parent = rotate_right_retrace(parent, pparent);
 
 				if (!parent)
 					return -ENOMEM;
@@ -762,9 +955,9 @@ static int insert_retrace(struct sptree_root *root, struct sptree_node *node)
 			if (parent->balancing > 0) {
 				// node is left-heavy
 				if (node->balancing < 0)
-					parent = rotate_right_left(parent, pparent);
+					parent = rotate_right_left_retrace(parent, pparent);
 				else
-					parent = rotate_left(parent, pparent);
+					parent = rotate_left_retrace(parent, pparent);
 
 				if (!parent)
 					return -ENOMEM;
@@ -789,15 +982,29 @@ static int insert_retrace(struct sptree_root *root, struct sptree_node *node)
 	return 0;
 }
 
-// create a subtree centered on addr
-// return the subtree or NULL
-static struct sptree_node *insert_alloc_subtree(struct sptree_node *target, unsigned long addr)
+/**
+ * insert_alloc_subtree() - creates a subtree centered on addr
+ * @node:	A leaf node (interval) from within the tree
+ * @addr:	Address where splitting is done
+ *
+ * The created subtree represents the same interval with a split at @addr.
+ * The subtree may be degenerate or just a node if @addr represents
+ * the starting/ending page of the interval (or both).
+ *
+ * Returns the root of the subtree or NULL if allocation failed.
+ */
+static struct sptree_node *insert_alloc_subtree(struct sptree_node *node, unsigned long addr)
 {
 	struct sptree_node *subtree_root = NULL;
 	struct sptree_node *subtree_left = NULL;
-	struct sptree_node *subtree_rite = NULL;
+	struct sptree_node *subtree_right = NULL;
 
-	pr_info("%s: splitting "NODE_FMT" at %lx\n", __func__, NODE_ARG(target), addr);
+	pr_info("%s: splitting "NODE_FMT" at %lx\n", __func__, NODE_ARG(node), addr);
+
+	// a mapping can also be a leaf if it replaced a segment of same size...
+	// ...but a segment can't be a node
+	BUG_ON(!is_leaf(node));
+	BUG_ON(is_mapping(node));
 
 	// this will be the mapping
 	subtree_root = kzalloc(sizeof(*subtree_root), GFP_ATOMIC);
@@ -809,13 +1016,13 @@ static struct sptree_node *insert_alloc_subtree(struct sptree_node *target, unsi
 	subtree_root->mapping = true;
 
 	// first page in range
-	if (addr != target->start) {
+	if (addr != node->start) {
 		subtree_left = kzalloc(sizeof(*subtree_left), GFP_ATOMIC);
 		if (!subtree_left)
 			goto error;
 
-		subtree_left->start = target->start;
-		subtree_left->length = addr - target->start;
+		subtree_left->start = node->start;
+		subtree_left->length = addr - node->start;
 
 		subtree_root->balancing -= 1;
 		subtree_root->left = subtree_left;
@@ -825,19 +1032,19 @@ static struct sptree_node *insert_alloc_subtree(struct sptree_node *target, unsi
 	}
 
 	// last page in range
-	if (addr != target->start + target->length - PAGE_SIZE) {
-		subtree_rite = kzalloc(sizeof(*subtree_rite), GFP_ATOMIC);
-		if (!subtree_rite)
+	if (addr != node->start + node->length - PAGE_SIZE) {
+		subtree_right = kzalloc(sizeof(*subtree_right), GFP_ATOMIC);
+		if (!subtree_right)
 			goto error;
 
-		subtree_rite->start = addr + PAGE_SIZE;
-		subtree_rite->length = target->length - (addr - target->start + PAGE_SIZE);
+		subtree_right->start = addr + PAGE_SIZE;
+		subtree_right->length = node->length - (addr - node->start + PAGE_SIZE);
 
 		subtree_root->balancing += 1;
-		subtree_root->right = subtree_rite;
-		subtree_rite->parent = make_right(subtree_root);
+		subtree_root->right = subtree_right;
+		subtree_right->parent = make_right(subtree_root);
 
-		pr_info("%s: to the right we have "NODE_FMT"\n", __func__, NODE_ARG(subtree_rite));
+		pr_info("%s: to the right we have "NODE_FMT"\n", __func__, NODE_ARG(subtree_right));
 	}
 
 	return subtree_root;
@@ -847,35 +1054,37 @@ error:
 		kfree(subtree_root);
 	if (subtree_left)
 		kfree(subtree_left);
-	if (subtree_rite)
-		kfree(subtree_rite);
+	if (subtree_right)
+		kfree(subtree_right);
 
 	return NULL;
 }
-// TODO: should I make sure the subtree is all linked up before returning ?
-// TODO: a barrier or something ??
 
-// replaces a leaf node with a subtree, increasing the local depth with 1
+/**
+ * sptree_insert() - inserts a mapping in an address interval
+ * @root:	The root of the tree
+ * @addr:	Address where splitting is done
+ *
+ * Finds the node containing @addr and splits it into a subtree.
+ * The subtree replaces the node in a RCU-safe manner.
+ *
+ * Returns 0 on success or -E... on failure.
+ */
 int sptree_insert(struct sptree_root *root, unsigned long addr)
 {
 	struct sptree_node *target, *parent;
 	struct sptree_node **ptarget;
 	struct sptree_node *subtree;
 
-	if (addr & ~PAGE_MASK)
-		return -EINVAL;
-	if (addr < root->start || addr > root->start + root->length - PAGE_SIZE)
+	if (!address_valid(root, addr))
 		return -EINVAL;
 
 	target = search(root, addr);
 	BUG_ON(!target);
 
+	// validate the node
 	if (target->mapping)
 		return -EALREADY;
-
-	// a mapping can also be a leaf if it replaced a segment of same size
-	BUG_ON(!is_leaf(target));
-	// but a segment can't be a node
 
 	// alloc & insert subtree
 	subtree = insert_alloc_subtree(target, addr);
@@ -903,9 +1112,21 @@ int sptree_insert(struct sptree_root *root, unsigned long addr)
 	return 0;
 }
 
+/**
+ * sptree_delete() - deletes a mapping from an address interval
+ * @root:	The root of the tree
+ * @addr:	Mapping address
+ *
+ * Finds the mapping at @addr and merges it with the successor
+ * and/or predesessor intervals to form a new interval.
+ * The new interval (a node) replaces the subtree centered at
+ * @addr in a RCU-safe manner.
+ *
+ * Returns 0 on success or -E... on failure.
+ */
 int sptree_delete(struct sptree_root *root, unsigned long addr)
 {
-
+	// TODO: ...
 
 
 
