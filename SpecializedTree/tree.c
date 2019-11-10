@@ -414,7 +414,7 @@ static struct sptree_node *rotate_right_left_rcu(struct sptree_node *root, struc
 	// root = X
 	struct sptree_node *right = root->right;	// Z
 	struct sptree_node **pright = &root->right;
-	//struct sptree_node *left = right->left;		// Y
+	//struct sptree_node *left = right->left;	// Y
 	struct sptree_node *new_root;
 
 	pr_info("%s: rotate right-left at "NODE_FMT"\n", __func__, NODE_ARG(root));
@@ -468,13 +468,50 @@ static struct sptree_node *rotate_left_right_rcu(struct sptree_node *root, struc
 }
 
 
+
+static struct sptree_node *rotate_right_generic(struct sptree_node *root, struct sptree_node **proot)
+{
+	// root = X
+	struct sptree_node *pivot = root->left;		// Y
+	struct sptree_node *new_root;			// new Y
+	struct sptree_node *new_pivot;			// new X
+
+	pr_info("%s: rotate right at "NODE_FMT", pivot at "NODE_FMT"\n",
+		__func__, NODE_ARG(root), NODE_ARG(pivot));
+
+	new_root = rotate_right_rcu(root, proot);
+	if (!new_root)
+		return NULL;
+
+	new_pivot = new_root->right;
+
+	// fix balance factors
+	if (pivot->balancing >= 0) {
+		new_pivot->balancing = root->balancing + 1;
+		if (root->balancing <= -1)
+			new_root->balancing = pivot->balancing + 1;
+		else
+			new_root->balancing = root->balancing + pivot->balancing + 2;
+	} else {
+		new_pivot->balancing = root->balancing - pivot->balancing + 1;
+		if (root->balancing <= pivot->balancing - 1)
+			new_root->balancing = pivot->balancing + 1;
+		else
+			new_root->balancing = root->balancing + 2;
+	}
+
+	pr_info("%s: rotated right, new root is "NODE_FMT"\n",
+		__func__, NODE_ARG(new_root));
+
+	return new_root;
+}
+
 int sptree_ror(struct sptree_root *root, unsigned long addr)
 {
 	struct sptree_node *target, *parent;
 	struct sptree_node **ptarget;
 	struct sptree_node *pivot;
 	struct sptree_node *new_root;
-	struct sptree_node *new_pivot;
 
 	if (!address_valid(root, addr))
 		return -EINVAL;
@@ -511,25 +548,51 @@ int sptree_ror(struct sptree_root *root, unsigned long addr)
 	parent = READ_ONCE(target->parent);
 	ptarget = get_pnode(root, parent);
 
-	new_root = rotate_right_rcu(target, ptarget);
+	new_root = rotate_right_generic(target, ptarget);
 	if (!new_root)
 		return -ENOMEM;
-
-	new_pivot = new_root->right;
-
-	// fix balance factors
-	if (pivot->balancing < 0) {
-		new_root->balancing = target->balancing + pivot->balancing + 3;
-		new_pivot->balancing = target->balancing + 2;
-	} else {
-		new_root->balancing = target->balancing + pivot->balancing + 2;
-		new_pivot->balancing = target->balancing + 1;
-	}
 
 	// TODO: remove once code stable
 	validate_avl_balancing(root);
 
 	return 0;
+}
+
+static struct sptree_node *rotate_left_generic(struct sptree_node *root, struct sptree_node **proot)
+{
+	// root = X
+	struct sptree_node *pivot = root->right;	// Y
+	struct sptree_node *new_root;			// new Y
+	struct sptree_node *new_pivot;			// new X
+
+	pr_info("%s: rotate left at "NODE_FMT", pivot at "NODE_FMT"\n",
+		__func__, NODE_ARG(root), NODE_ARG(pivot));
+
+	new_root = rotate_left_rcu(root, proot);
+	if (!new_root)
+		return NULL;
+
+	new_pivot = new_root->left;
+
+	// fix balance factors
+	if (pivot->balancing <= 0) {
+		new_pivot->balancing = root->balancing - 1;
+		if (root->balancing >= 1)
+			new_root->balancing = pivot->balancing - 1;
+		else
+			new_root->balancing = root->balancing + pivot->balancing - 2;
+	} else {
+		new_pivot->balancing = root->balancing - pivot->balancing - 1;
+		if (root->balancing >= pivot->balancing + 1)
+			new_root->balancing = pivot->balancing - 1;
+		else
+			new_root->balancing = root->balancing - 2;
+	}
+
+	pr_info("%s: rotated left, new root is "NODE_FMT"\n",
+		__func__, NODE_ARG(new_root));
+
+	return new_root;
 }
 
 int sptree_rol(struct sptree_root *root, unsigned long addr)
@@ -538,7 +601,6 @@ int sptree_rol(struct sptree_root *root, unsigned long addr)
 	struct sptree_node **ptarget;
 	struct sptree_node *pivot;
 	struct sptree_node *new_root;
-	struct sptree_node *new_pivot;
 
 	if (!address_valid(root, addr))
 		return -EINVAL;
@@ -575,25 +637,99 @@ int sptree_rol(struct sptree_root *root, unsigned long addr)
 	parent = READ_ONCE(target->parent);
 	ptarget = get_pnode(root, parent);
 
-	new_root = rotate_left_rcu(target, ptarget);
+	new_root = rotate_left_generic(target, ptarget);
 	if (!new_root)
 		return -ENOMEM;
-
-	new_pivot = new_root->left;
-
-	// fix balance factors
-	if (pivot->balancing > 0) {
-		new_root->balancing = target->balancing + pivot->balancing - 3;
-		new_pivot->balancing = target->balancing - 2;
-	} else {
-		new_root->balancing = target->balancing + pivot->balancing - 2;
-		new_pivot->balancing = target->balancing - 1;
-	}
 
 	// TODO: remove once code stable
 	validate_avl_balancing(root);
 
 	return 0;
+}
+
+/**
+ * ror_height_increase() - check if height of tree is modified by rotation
+ * @root:	The node rooting a subtree
+ *
+ * Sometimes a simple rotation causes the overall height of a tree to
+ * increase/decrease (by maximum 1).
+ * This is important in compound rotations, since the balance of the root has
+ * to be modified after the first rotation.
+ * Returns -1/0/+1 depending of the modification of the height.
+ */
+static int ror_height_increase(struct sptree_node *root)
+{
+	// root = X
+	struct sptree_node *pivot = root->left;		// Y
+
+	if (pivot->balancing >= 0) {
+		if (root->balancing >= 0)
+			return 1;
+	} else {
+		if (root->balancing >= -1)
+			return 1;
+		else if (root->balancing <= -2)
+			return -1;
+	}
+
+	return 0;
+}
+
+/**
+ * rol_height_increase() - check if height of tree is modified by rotation
+ * @root:	The node rooting a subtree
+ *
+ * Sometimes a simple rotation causes the overall height of a tree to
+ * increase/decrease (by maximum 1).
+ * This is important in compound rotations, since the balance of the root has
+ * to be modified after the first rotation.
+ * Returns -1/0/+1 depending of the modification of the height.
+ */
+static int rol_height_increase(struct sptree_node *root)
+{
+	// root = X
+	struct sptree_node *pivot = root->right;	// Y
+
+	if (pivot->balancing <= 0) {
+		if (root->balancing <= 0)
+			return 1;
+	} else {
+		if (root->balancing <= 1)
+			return 1;
+		else if (root->balancing >= 2)
+			return -1;
+	}
+
+	return 0;
+}
+// TODO: write a function that returns -1, 0, 1, depending on the increase/decrease of the height of the tree
+
+static struct sptree_node *rotate_right_left_generic(struct sptree_node *root, struct sptree_node **proot)
+{
+	// root = X
+	struct sptree_node *right = root->right;	// Z
+	struct sptree_node **pright = &root->right;
+	//struct sptree_node *left = right->left;	// Y
+	struct sptree_node *new_root;			// new Y
+
+	pr_info("%s: rotate right-left at "NODE_FMT"\n", __func__, NODE_ARG(root));
+
+	// the next rotation will increase the height of the subtree
+	root->balancing += ror_height_increase(right);
+
+	// rotate right on Z
+	if (!rotate_right_generic(right, pright))
+		return NULL;
+
+	// rotate left on X
+	new_root = rotate_left_generic(root, proot);
+	if (!new_root)
+		return NULL;
+
+	pr_info("%s: rotated right-left, new root is "NODE_FMT"\n",
+		__func__, NODE_ARG(new_root));
+
+	return new_root;
 }
 
 int sptree_rrl(struct sptree_root *root, unsigned long addr)
@@ -634,7 +770,7 @@ int sptree_rrl(struct sptree_root *root, unsigned long addr)
 	parent = READ_ONCE(target->parent);
 	ptarget = get_pnode(root, parent);
 
-	subtree = rotate_right_left_rcu(target, ptarget);
+	subtree = rotate_right_left_generic(target, ptarget);
 	if (!subtree)
 		return -ENOMEM;
 
@@ -642,6 +778,34 @@ int sptree_rrl(struct sptree_root *root, unsigned long addr)
 	validate_avl_balancing(root);
 
 	return 0;
+}
+
+static struct sptree_node *rotate_left_right_generic(struct sptree_node *root, struct sptree_node **proot)
+{
+	// root = X
+	struct sptree_node *left = root->left;		// Z
+	struct sptree_node **pleft = &root->left;
+	//struct sptree_node *right = left->right;	// Y
+	struct sptree_node *new_root;
+
+	pr_info("%s: rotate left-right at "NODE_FMT"\n", __func__, NODE_ARG(root));
+
+	// the next rotation will increase the height of the subtree
+	root->balancing -= rol_height_increase(left);
+
+	// rotate left on Z
+	if (!rotate_left_generic(left, pleft))
+		return NULL;
+
+	// rotate right on X
+	new_root = rotate_right_generic(root, proot);
+	if (!new_root)
+		return NULL;
+
+	pr_info("%s: rotated left-right, new root is "NODE_FMT"\n",
+		__func__, NODE_ARG(new_root));
+
+	return new_root;
 }
 
 int sptree_rlr(struct sptree_root *root, unsigned long addr)
@@ -682,7 +846,7 @@ int sptree_rlr(struct sptree_root *root, unsigned long addr)
 	parent = READ_ONCE(target->parent);
 	ptarget = get_pnode(root, parent);
 
-	subtree = rotate_left_right_rcu(target, ptarget);
+	subtree = rotate_left_right_generic(target, ptarget);
 	if (!subtree)
 		return -ENOMEM;
 
