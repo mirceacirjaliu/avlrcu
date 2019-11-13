@@ -11,7 +11,18 @@
 
 #include "tree.h"
 
-int sptree_init(struct sptree_root *root, unsigned long start, size_t length)
+int standard_init(struct sptree_root *root, unsigned long start, size_t length)
+{
+	root->start = start;
+	root->length = length;
+	root->root = NULL;
+
+	pr_info("%s: created root\n", __func__);
+
+	return 0;
+}
+
+int interval_init(struct sptree_root *root, unsigned long start, size_t length)
 {
 	root->root = kmalloc(sizeof(*root->root), GFP_KERNEL);
 	if (!root->root)
@@ -32,6 +43,9 @@ int sptree_init(struct sptree_root *root, unsigned long start, size_t length)
 // recursive post-order free function
 static void postorder_free(struct sptree_node *node)
 {
+	if (!node)
+		return;
+
 	if (node->left)
 		postorder_free(node->left);
 
@@ -280,9 +294,9 @@ static struct sptree_node *rotate_right_rcu(struct sptree_node *root, struct spt
 		__func__, NODE_ARG(root), NODE_ARG(pivot));
 
 	BUG_ON(*proot != root);
-	BUG_ON(!root->mapping);
+	BUG_ON(!is_mapping(root));
 	BUG_ON(!pivot);
-	BUG_ON(!pivot->mapping);
+	BUG_ON(!is_mapping(pivot));
 
 	// alloc new nodes
 	new_root = kzalloc(sizeof(*new_root), GFP_ATOMIC);
@@ -349,9 +363,9 @@ static struct sptree_node *rotate_left_rcu(struct sptree_node *root, struct sptr
 		__func__, NODE_ARG(root), NODE_ARG(pivot));
 
 	BUG_ON(*proot != root);
-	BUG_ON(!root->mapping);
+	BUG_ON(!is_mapping(root));
 	BUG_ON(!pivot);
-	BUG_ON(!pivot->mapping);
+	BUG_ON(!is_mapping(pivot));
 
 	// alloc new nodes
 	new_root = kzalloc(sizeof(*new_root), GFP_ATOMIC);
@@ -702,7 +716,6 @@ static int rol_height_increase(struct sptree_node *root)
 
 	return 0;
 }
-// TODO: write a function that returns -1, 0, 1, depending on the increase/decrease of the height of the tree
 
 static struct sptree_node *rotate_right_left_generic(struct sptree_node *root, struct sptree_node **proot)
 {
@@ -1042,7 +1055,7 @@ static struct sptree_node *rotate_left_right_retrace(struct sptree_node *root, s
 }
 
 /**
- * insert_retrace() - retracing after insert
+ * standard_retrace() - retracing after insert
  * @root:	Root of the tree
  * @node:	Node where retracing begins
  *
@@ -1050,7 +1063,7 @@ static struct sptree_node *rotate_left_right_retrace(struct sptree_node *root, s
  *
  * Returns 0 for success or -ENOMEM if rotations fail.
  */
-static int insert_retrace(struct sptree_root *root, struct sptree_node *node)
+static int standard_retrace(struct sptree_root *root, struct sptree_node *node)
 {
 	struct sptree_node *parent, *gparent;
 	struct sptree_node **pparent;
@@ -1139,7 +1152,26 @@ static int insert_retrace(struct sptree_root *root, struct sptree_node *node)
 }
 
 /**
- * insert_alloc_subtree() - creates a subtree centered on addr
+ * interval_retrace() - custom retracing for splitting case
+ * @root:	Root of the tree
+ * @node:	Node where retracing begins
+ *
+ * This differs from the standard retracing algorithm because a subtree is
+ * inserted at the end, and a rotation may not always balance the subtree.
+ * So retracing is not stopped after the first rotation.
+ *
+ * Returns 0 for success or -ENOMEM if rotations fail.
+ */
+static int interval_retrace(struct sptree_root *root, struct sptree_node *node)
+{
+	// ...
+
+	return 0;
+}
+
+
+/**
+ * interval_alloc_subtree() - creates a subtree centered on addr
  * @node:	A leaf node (interval) from within the tree
  * @addr:	Address where splitting is done
  *
@@ -1149,7 +1181,7 @@ static int insert_retrace(struct sptree_root *root, struct sptree_node *node)
  *
  * Returns the root of the subtree or NULL if allocation failed.
  */
-static struct sptree_node *insert_alloc_subtree(struct sptree_node *node, unsigned long addr)
+static struct sptree_node *interval_alloc_subtree(struct sptree_node *node, unsigned long addr)
 {
 	struct sptree_node *subtree_root = NULL;
 	struct sptree_node *subtree_left = NULL;
@@ -1217,7 +1249,7 @@ error:
 }
 
 /**
- * sptree_insert() - inserts a mapping in an address interval
+ * interval_insert() - inserts a mapping in an address interval
  * @root:	The root of the tree
  * @addr:	Address where splitting is done
  *
@@ -1226,7 +1258,7 @@ error:
  *
  * Returns 0 on success or -E... on failure.
  */
-int sptree_insert(struct sptree_root *root, unsigned long addr)
+int interval_insert(struct sptree_root *root, unsigned long addr)
 {
 	struct sptree_node *target, *parent;
 	struct sptree_node **ptarget;
@@ -1239,11 +1271,11 @@ int sptree_insert(struct sptree_root *root, unsigned long addr)
 	BUG_ON(!target);
 
 	// validate the node
-	if (target->mapping)
+	if (is_mapping(target))
 		return -EALREADY;
 
 	// alloc & insert subtree
-	subtree = insert_alloc_subtree(target, addr);
+	subtree = interval_alloc_subtree(target, addr);
 	if (!subtree)
 		return -ENOMEM;
 
@@ -1257,13 +1289,67 @@ int sptree_insert(struct sptree_root *root, unsigned long addr)
 
 	// rebalance tree if the subtree has depth != 1
 	if (!is_leaf(subtree))
-		insert_retrace(root, subtree);
+		interval_retrace(root, subtree);
 
 	// TODO: remove once code stable
 	validate_avl_balancing(root);
 
 	// finally free the replaced node
 	kfree_rcu(target, rcu);
+
+	return 0;
+}
+
+/**
+ * standard_insert() - inserts a standard node in an AVL tree
+ * @root:	The root of the tree
+ * @addr:	Address of the node
+ *
+ * Inserts a node in a tree at @addr. The insertion is RCU-safe
+ * by default. Marks it as a mapping for backward compliance.
+ *
+ * Returns 0 on success or -E... on failure.
+ */
+int standard_insert(struct sptree_root *root, unsigned long addr)
+{
+	struct sptree_node *crnt, *parent;
+	struct sptree_node **pparent;
+	struct sptree_node *node;
+
+	if (!address_valid(root, addr))
+		return -EINVAL;
+
+	/* look for a parent */
+	for (crnt = root->root, parent = NULL, pparent = &root->root; crnt != NULL; ) {
+		if (addr == crnt->start)
+			return -EINVAL;
+		else if (addr < crnt->start) {
+			parent = make_left(crnt);
+			pparent = &crnt->left;
+			crnt = crnt->left;
+		} else {
+			parent = make_right(crnt);
+			pparent = &crnt->right;
+			crnt = crnt->right;
+		}
+	}
+
+	node = kzalloc(sizeof(*node), GFP_ATOMIC);
+	if (!node)
+		return -ENOMEM;
+
+	node->start = addr;
+	node->length = PAGE_SIZE;
+	node->mapping = true;
+
+	// reverse, then direct link
+	WRITE_ONCE(node->parent, parent);
+	WRITE_ONCE(*pparent, node);
+
+	standard_retrace(root, node);
+
+	// TODO: remove once code stable
+	validate_avl_balancing(root);
 
 	return 0;
 }

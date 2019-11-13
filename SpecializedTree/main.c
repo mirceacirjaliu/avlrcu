@@ -121,7 +121,7 @@ static ssize_t insert_map(struct file *file, const char __user *data, size_t cou
 	}
 
 	spin_lock(&lock);
-	result = sptree_insert(&sptree_range, value);
+	result = standard_insert(&sptree_range, value);
 	spin_unlock(&lock);
 
 	if (result == 0)
@@ -178,7 +178,7 @@ static ssize_t clear_map(struct file *file, const char __user *data, size_t coun
 	sptree_free(&sptree_range);
 
 	// create the sptree_range: 4KB - 1MB
-	result = sptree_init(&sptree_range, 4 * KB, 1 * MB - 4 * KB);
+	result = standard_init(&sptree_range, 4 * KB, 1 * MB - 4 * KB);
 	if (result)
 		pr_warn("%s: failed reinit!!\n", __func__);
 
@@ -359,6 +359,10 @@ static void *dump_gv_start(struct seq_file *s, loff_t *pos)
 	seq_puts(s, "digraph G {\n");
 	seq_puts(s, "\troot [label=\"ROOT\", shape=box]\n");
 
+	// in case of an empty tree we still want the header & footer
+	//if (iter->node == NULL)
+	//	return NULL;
+
 	return iter;
 }
 
@@ -366,9 +370,19 @@ static int dump_gv_show(struct seq_file *s, void *v)
 {
 	struct sptree_iterator *iter = s->private;
 	struct sptree_node *node = iter->node;
-	struct sptree_node *parent = node->parent;	// may contain L/R flags
-	struct sptree_node *left = node->left;
-	struct sptree_node *right = node->right;
+	struct sptree_node *parent;
+	struct sptree_node *left;
+	struct sptree_node *right;
+
+	// we must still enter here, case the flow control in seq_file.c won't
+	// print the header & footer in case ..._start() returns NULL
+	if (node == NULL)
+		return 0;
+
+	// warning: ISO C90 forbids mixed declarations and code
+	parent = node->parent;	// may contain L/R flags
+	left = node->left;
+	right = node->right;
 
 	seq_printf(s, "\tn%lx [label=\"%lx - %lx\\n%d\", style=filled, fillcolor=%s]\n",
 		(unsigned long)node, node->start, node->start + node->length,
@@ -419,6 +433,8 @@ static void dump_gv_stop(struct seq_file *s, void *v)
 	// print footer
 	if (iter->node == NULL)
 		seq_puts(s, "}\n");
+
+	// iterator is freed by seq_release_private()
 }
 
 static struct seq_operations dump_gv_seq_ops = {
@@ -457,6 +473,9 @@ static void *dump_po_start(struct seq_file *s, loff_t *pos)
 	sptree_iter_first_po(&sptree_range, iter);
 	s->private = iter;
 
+	//if (iter->node == NULL)
+	//	return NULL;
+
 	return iter;
 }
 
@@ -464,6 +483,11 @@ static int dump_po_show(struct seq_file *s, void *v)
 {
 	struct sptree_iterator *iter = s->private;
 	struct sptree_node *node = iter->node;
+
+	// we must still enter here, case the flow control in seq_file.c won't
+	// print the header & footer in case ..._start() returns NULL
+	if (node == NULL)
+		return 0;
 
 	if (node->mapping)
 		seq_printf(s, "%lx\n", node->start);
@@ -485,6 +509,7 @@ static void *dump_po_next(struct seq_file *s, void *v, loff_t *pos)
 
 static void dump_po_stop(struct seq_file *s, void *v)
 {
+	// iterator is freed by seq_release_private()
 }
 
 static struct seq_operations dump_po_seq_ops = {
@@ -610,7 +635,7 @@ static int __init sptree_test_init(void)
 	int result;
 
 	// create the sptree_range: 4KB - 1MB
-	result = sptree_init(&sptree_range, 4 * KB, 1 * MB - 4 * KB);
+	result = standard_init(&sptree_range, 4 * KB, 1 * MB - 4 * KB);
 	if (result)
 		return result;
 
