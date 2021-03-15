@@ -17,7 +17,7 @@ int standard_init(struct sptree_root *root, unsigned long start, size_t length)
 	root->length = length;
 	root->root = NULL;
 
-	pr_info("%s: created root\n", __func__);
+	pr_info("%s: created empty root\n", __func__);
 
 	return 0;
 }
@@ -410,7 +410,7 @@ static struct sptree_node *rotate_left_rcu(struct sptree_node *root, struct sptr
 }
 
 /**
- * rotate_right_left_rcu() - compound rotation
+ * rotate_right_left_rcu() - core compound rotation
  * @root:	The node rooting a subtree
  * @proot:	Address of pointer to @root (for changing parent)
  *		(root->root / parent->left / parent->right)
@@ -446,7 +446,7 @@ static struct sptree_node *rotate_right_left_rcu(struct sptree_node *root, struc
 }
 
 /**
- * rotate_left_right_rcu() - compound rotation
+ * rotate_left_right_rcu() - core compound rotation
  * @root:	The node rooting a subtree
  * @proot:	Address of pointer to @root (for changing parent)
  *		(root->root / parent->left / parent->right)
@@ -572,6 +572,7 @@ int sptree_ror(struct sptree_root *root, unsigned long addr)
 	return 0;
 }
 
+
 static struct sptree_node *rotate_left_generic(struct sptree_node *root, struct sptree_node **proot)
 {
 	// root = X
@@ -661,6 +662,7 @@ int sptree_rol(struct sptree_root *root, unsigned long addr)
 	return 0;
 }
 
+
 /**
  * ror_height_increase() - check if height of tree is modified by rotation
  * @root:	The node rooting a subtree
@@ -671,23 +673,31 @@ int sptree_rol(struct sptree_root *root, unsigned long addr)
  * to be modified after the first rotation.
  * Returns -1/0/+1 depending of the modification of the height.
  */
-static int ror_height_increase(struct sptree_node *root)
-{
-	// root = X
-	struct sptree_node *pivot = root->left;		// Y
-
-	if (pivot->balancing >= 0) {
-		if (root->balancing >= 0)
-			return 1;
-	} else {
-		if (root->balancing >= -1)
-			return 1;
-		else if (root->balancing <= -2)
-			return -1;
-	}
-
-	return 0;
-}
+//static int ror_height_increase(struct sptree_node *root)
+//{
+//	// root = X
+//	struct sptree_node *pivot = root->left;		// Y
+//	int increase = 0;
+//
+//	if (pivot->balancing >= 0) {
+//		if (root->balancing >= 0)
+//			increase = 1;
+//	} else {
+//		if (root->balancing >= -1)
+//			increase = 1;
+//		else if (root->balancing <= -2)
+//			increase = -1;
+//	}
+//
+//	if (increase == -1)
+//		pr_info("%s: height of "NODE_FMT" decreases\n", __func__, NODE_ARG(root));
+//	else if (increase == 1)
+//		pr_info("%s: height of "NODE_FMT" increases\n", __func__, NODE_ARG(root));
+//	else
+//		pr_info("%s: height of "NODE_FMT" stays the same\n", __func__, NODE_ARG(root));
+//
+//	return increase;
+//}
 
 /**
  * rol_height_increase() - check if height of tree is modified by rotation
@@ -699,23 +709,32 @@ static int ror_height_increase(struct sptree_node *root)
  * to be modified after the first rotation.
  * Returns -1/0/+1 depending of the modification of the height.
  */
-static int rol_height_increase(struct sptree_node *root)
-{
-	// root = X
-	struct sptree_node *pivot = root->right;	// Y
+//static int rol_height_increase(struct sptree_node *root)
+//{
+//	// root = X
+//	struct sptree_node *pivot = root->right;	// Y
+//	int increase = 0;
+//
+//	if (pivot->balancing <= 0) {
+//		if (root->balancing <= 0)
+//			increase = 1;
+//	} else {
+//		if (root->balancing <= 1)
+//			increase = 1;
+//		else if (root->balancing >= 2)
+//			increase = -1;
+//	}
+//
+//	if (increase == -1)
+//		pr_info("%s: height of "NODE_FMT" decreases\n", __func__, NODE_ARG(root));
+//	else if (increase == 1)
+//		pr_info("%s: height of "NODE_FMT" increases\n", __func__, NODE_ARG(root));
+//	else
+//		pr_info("%s: height of "NODE_FMT" stays the same\n", __func__, NODE_ARG(root));
+//
+//	return increase;
+//}
 
-	if (pivot->balancing <= 0) {
-		if (root->balancing <= 0)
-			return 1;
-	} else {
-		if (root->balancing <= 1)
-			return 1;
-		else if (root->balancing >= 2)
-			return -1;
-	}
-
-	return 0;
-}
 
 static struct sptree_node *rotate_right_left_generic(struct sptree_node *root, struct sptree_node **proot)
 {
@@ -727,8 +746,9 @@ static struct sptree_node *rotate_right_left_generic(struct sptree_node *root, s
 
 	pr_info("%s: rotate right-left at "NODE_FMT"\n", __func__, NODE_ARG(root));
 
+	// TODO: astea nu merg bine
 	// the next rotation will increase the height of the subtree
-	root->balancing += ror_height_increase(right);
+	//root->balancing += ror_height_increase(right);
 
 	// rotate right on Z
 	if (!rotate_right_generic(right, pright))
@@ -793,6 +813,7 @@ int sptree_rrl(struct sptree_root *root, unsigned long addr)
 	return 0;
 }
 
+
 static struct sptree_node *rotate_left_right_generic(struct sptree_node *root, struct sptree_node **proot)
 {
 	// root = X
@@ -803,8 +824,9 @@ static struct sptree_node *rotate_left_right_generic(struct sptree_node *root, s
 
 	pr_info("%s: rotate left-right at "NODE_FMT"\n", __func__, NODE_ARG(root));
 
+	// TODO: astea nu merg bine
 	// the next rotation will increase the height of the subtree
-	root->balancing -= rol_height_increase(left);
+	//root->balancing -= rol_height_increase(left);
 
 	// rotate left on Z
 	if (!rotate_left_generic(left, pleft))
@@ -1151,6 +1173,7 @@ static int standard_retrace(struct sptree_root *root, struct sptree_node *node)
 	return 0;
 }
 
+
 /**
  * interval_retrace() - custom retracing for splitting case
  * @root:	Root of the tree
@@ -1168,7 +1191,6 @@ static int interval_retrace(struct sptree_root *root, struct sptree_node *node)
 
 	return 0;
 }
-
 
 /**
  * interval_alloc_subtree() - creates a subtree centered on addr
