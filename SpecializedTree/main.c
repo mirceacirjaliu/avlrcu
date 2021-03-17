@@ -418,11 +418,11 @@ static void *dump_gv_next(struct seq_file *s, void *v, loff_t *pos)
 {
 	struct sptree_iterator *iter = s->private;
 
+	(*pos)++;
 	sptree_iter_next_io(iter);
 	if (iter->node == NULL)
 		return NULL;
 
-	(*pos)++;
 	return iter;
 }
 
