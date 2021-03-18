@@ -631,10 +631,10 @@ int sptree_ror(struct sptree_root *root, unsigned long addr)
 		return -EINVAL;
 
 	target = search(root, addr);
-	BUG_ON(!target);
-	pivot = target->left;
+	if (!target)
+		return -ENXIO;
 
-	// validate nodes
+	pivot = target->left;
 	if (!pivot) {
 		pr_err("%s: we don't have a pivot for "NODE_FMT"\n", __func__, NODE_ARG(target));
 		return -EINVAL;
@@ -720,10 +720,10 @@ int sptree_rol(struct sptree_root *root, unsigned long addr)
 		return -EINVAL;
 
 	target = search(root, addr);
-	BUG_ON(!target);
-	pivot = target->right;
+	if (!target)
+		return -ENXIO;
 
-	// validate nodes
+	pivot = target->right;
 	if (!pivot) {
 		pr_err("%s: we don't have a pivot for "NODE_FMT"\n", __func__, NODE_ARG(target));
 		return -EINVAL;
@@ -790,7 +790,8 @@ int sptree_rrl(struct sptree_root *root, unsigned long addr)
 		return -EINVAL;
 
 	target = search(root, addr);
-	BUG_ON(!target);
+	if (!target)
+		return -ENXIO;
 
 	// validate the node
 	if (!target->right) {
@@ -852,7 +853,8 @@ int sptree_rlr(struct sptree_root *root, unsigned long addr)
 		return -EINVAL;
 
 	target = search(root, addr);
-	BUG_ON(!target);
+	if (!target)
+		return -ENXIO;
 
 	// validate the node
 	if (!target->left) {
@@ -1257,7 +1259,8 @@ int sptree_delete(struct sptree_root *root, unsigned long addr)
 		return -EINVAL;
 
 	target = search(root, addr);
-	BUG_ON(!target);
+	if (!target)
+		return -ENXIO;
 
 	// validate the node
 	if (!is_leaf(target)) {
@@ -1283,5 +1286,3 @@ int sptree_delete(struct sptree_root *root, unsigned long addr)
 
 	return 0;
 }
-
-// TODO: BUG_ON(!target) after target = search(root, addr) should be an error, not a BUG
