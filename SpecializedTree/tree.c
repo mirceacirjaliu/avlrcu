@@ -482,6 +482,28 @@ static struct sptree_node *rotate_left_right_rcu(struct sptree_node *root, struc
 }
 
 /**
+ * delete_leaf_rcu() - core leaf deletion
+ * @root:	The node rooting a subtree
+ * @proot:	Address of pointer to @root (for changing parent)
+ *		(root->root / parent->left / parent->right)
+ *
+ * Deletes the @root in a RCU-safe manner.
+ * Does not do balance factor fixing.
+ */
+static void delete_leaf_rcu(struct sptree_node *root, struct sptree_node **proot)
+{
+	pr_info("%s: deleting at "NODE_FMT"\n", __func__, NODE_ARG(root));
+
+	BUG_ON(!is_leaf(root));
+
+	// unlink this leaf
+	WRITE_ONCE(*proot, NULL);
+
+	// free the leaf
+	kfree_rcu(root, rcu);
+}
+
+/**
  * ror_height_diff() - check if height of tree is modified by rotation
  * @root:	The node rooting a subtree
  *
@@ -560,6 +582,7 @@ static void propagate_height_diff(struct sptree_node *subtree, int diff)
 	struct sptree_node *parent;
 	bool left;
 
+	// TODO: READ_ONCE(subtree->parent) ?
 	for (parent = subtree->parent; !is_root(parent); parent = parent->parent) {
 		left = is_left_child(parent);
 		parent = strip_flag(parent);
@@ -1199,6 +1222,60 @@ static int standard_retrace(struct sptree_root *root, struct sptree_node *node)
 	return 0;
 }
 
+/**
+ * standard_insert() - inserts a standard node in an AVL tree
+ * @root:	The root of the tree
+ * @addr:	Address of the node
+ *
+ * Inserts a node in a tree at @addr. The insertion is RCU-safe
+ * by default. Marks it as a mapping for backward compliance.
+ *
+ * Returns 0 on success or -E... on failure.
+ */
+int standard_insert(struct sptree_root *root, unsigned long addr)
+{
+	struct sptree_node *crnt, *parent;
+	struct sptree_node **pparent;
+	struct sptree_node *node;
+
+	if (!address_valid(root, addr))
+		return -EINVAL;
+
+	/* look for a parent */
+	for (crnt = root->root, parent = NULL, pparent = &root->root; crnt != NULL; ) {
+		if (addr == crnt->start)
+			return -EINVAL;
+		else if (addr < crnt->start) {
+			parent = make_left(crnt);
+			pparent = &crnt->left;
+			crnt = crnt->left;
+		} else {
+			parent = make_right(crnt);
+			pparent = &crnt->right;
+			crnt = crnt->right;
+		}
+	}
+
+	node = kzalloc(sizeof(*node), GFP_ATOMIC);
+	if (!node)
+		return -ENOMEM;
+
+	node->start = addr;
+	node->length = PAGE_SIZE;
+	node->mapping = true;
+
+	// reverse, then direct link
+	WRITE_ONCE(node->parent, parent);
+	WRITE_ONCE(*pparent, node);
+
+	standard_retrace(root, node);
+
+	// TODO: remove once code stable
+	validate_avl_balancing(root);
+
+	return 0;
+}
+
 
 /**
  * interval_retrace() - custom retracing for splitting case
@@ -1348,58 +1425,27 @@ int interval_insert(struct sptree_root *root, unsigned long addr)
 	return 0;
 }
 
+
 /**
- * standard_insert() - inserts a standard node in an AVL tree
- * @root:	The root of the tree
- * @addr:	Address of the node
+ * delete_leaf() - helper for leaf deleting
+ * @root:	The node rooting a subtree (the leaf itself)
+ * @proot:	Address of pointer to @root (for changing parent)
+ *		(root->root / parent->left / parent->right)
  *
- * Inserts a node in a tree at @addr. The insertion is RCU-safe
- * by default. Marks it as a mapping for backward compliance.
- *
- * Returns 0 on success or -E... on failure.
+ * Called after the node to be deleted is moved down the tree.
+ * In the end the node represents an empty subtree rooted by itself (depth 1).
+ * Since it goes away, the branch containing it must change balance.
  */
-int standard_insert(struct sptree_root *root, unsigned long addr)
+static void delete_leaf(struct sptree_node *node, struct sptree_node **pnode)
 {
-	struct sptree_node *crnt, *parent;
-	struct sptree_node **pparent;
-	struct sptree_node *node;
+	pr_info("%s: deleting at "NODE_FMT"\n", __func__, NODE_ARG(node));
 
-	if (!address_valid(root, addr))
-		return -EINVAL;
+	BUG_ON(!is_leaf(node));
 
-	/* look for a parent */
-	for (crnt = root->root, parent = NULL, pparent = &root->root; crnt != NULL; ) {
-		if (addr == crnt->start)
-			return -EINVAL;
-		else if (addr < crnt->start) {
-			parent = make_left(crnt);
-			pparent = &crnt->left;
-			crnt = crnt->left;
-		} else {
-			parent = make_right(crnt);
-			pparent = &crnt->right;
-			crnt = crnt->right;
-		}
-	}
+	// this node/leaf represents the subtree that changes height
+	propagate_height_diff(node, -1);
 
-	node = kzalloc(sizeof(*node), GFP_ATOMIC);
-	if (!node)
-		return -ENOMEM;
-
-	node->start = addr;
-	node->length = PAGE_SIZE;
-	node->mapping = true;
-
-	// reverse, then direct link
-	WRITE_ONCE(node->parent, parent);
-	WRITE_ONCE(*pparent, node);
-
-	standard_retrace(root, node);
-
-	// TODO: remove once code stable
-	validate_avl_balancing(root);
-
-	return 0;
+	delete_leaf_rcu(node, pnode);
 }
 
 /**
@@ -1416,9 +1462,39 @@ int standard_insert(struct sptree_root *root, unsigned long addr)
  */
 int sptree_delete(struct sptree_root *root, unsigned long addr)
 {
-	// TODO: ...
+	struct sptree_node *target, *parent;
+	struct sptree_node **ptarget;
 
+	if (!address_valid(root, addr))
+		return -EINVAL;
 
+	target = search(root, addr);
+	BUG_ON(!target);
+
+	// validate the node
+	if (!is_leaf(target)) {
+		pr_err("%s: found node "NODE_FMT", not a leaf\n", __func__, NODE_ARG(target));
+		return -EINVAL;
+	}
+
+	// TODO: unwinding algorithm, target goes down the tree
+	// ...
+
+	// may contain L/R flags or NULL
+	parent = READ_ONCE(target->parent);
+	ptarget = get_pnode(root, parent);
+
+	// call the internal delete function
+	delete_leaf(target, ptarget);
+
+	// TODO: walk up the branch & fix the tree
+	// ...
+
+	// TODO: remove once code stable
+	validate_avl_balancing(root);
 
 	return 0;
 }
+
+// TODO: BUG_ON(!target) after target = search(root, addr) should be an error, not a BUG
+// TODO: remove sptree_node->mapping field & interval_xxx() functions
