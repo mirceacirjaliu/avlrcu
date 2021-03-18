@@ -22,24 +22,6 @@ int standard_init(struct sptree_root *root, unsigned long start, size_t length)
 	return 0;
 }
 
-int interval_init(struct sptree_root *root, unsigned long start, size_t length)
-{
-	root->root = kmalloc(sizeof(*root->root), GFP_KERNEL);
-	if (!root->root)
-		return -ENOMEM;
-
-	root->start = start;
-	root->length = length;
-
-	memset(root->root, 0, sizeof(*root->root));
-	root->root->start = start;
-	root->root->length = length;
-
-	pr_info("%s: created root "NODE_FMT"\n", __func__, NODE_ARG(root->root));
-
-	return 0;
-}
-
 // recursive post-order free function
 static void postorder_free(struct sptree_node *node)
 {
@@ -294,9 +276,7 @@ static struct sptree_node *rotate_right_rcu(struct sptree_node *root, struct spt
 		__func__, NODE_ARG(root), NODE_ARG(pivot));
 
 	BUG_ON(*proot != root);
-	BUG_ON(!is_mapping(root));
 	BUG_ON(!pivot);
-	BUG_ON(!is_mapping(pivot));
 
 	// alloc new nodes
 	new_root = kzalloc(sizeof(*new_root), GFP_ATOMIC);
@@ -363,9 +343,7 @@ static struct sptree_node *rotate_left_rcu(struct sptree_node *root, struct sptr
 		__func__, NODE_ARG(root), NODE_ARG(pivot));
 
 	BUG_ON(*proot != root);
-	BUG_ON(!is_mapping(root));
 	BUG_ON(!pivot);
-	BUG_ON(!is_mapping(pivot));
 
 	// alloc new nodes
 	new_root = kzalloc(sizeof(*new_root), GFP_ATOMIC);
@@ -657,16 +635,8 @@ int sptree_ror(struct sptree_root *root, unsigned long addr)
 	pivot = target->left;
 
 	// validate nodes
-	if (!is_mapping(target)) {
-		pr_err("%s: found root "NODE_FMT", not a mapping\n", __func__, NODE_ARG(target));
-		return -EINVAL;
-	}
 	if (!pivot) {
 		pr_err("%s: we don't have a pivot for "NODE_FMT"\n", __func__, NODE_ARG(target));
-		return -EINVAL;
-	}
-	if (!is_mapping(pivot)) {
-		pr_err("%s: pivot "NODE_FMT" not a mapping\n", __func__, NODE_ARG(pivot));
 		return -EINVAL;
 	}
 
@@ -754,16 +724,8 @@ int sptree_rol(struct sptree_root *root, unsigned long addr)
 	pivot = target->right;
 
 	// validate nodes
-	if (!is_mapping(target)) {
-		pr_err("%s: found root "NODE_FMT", not a mapping\n", __func__, NODE_ARG(target));
-		return -EINVAL;
-	}
 	if (!pivot) {
 		pr_err("%s: we don't have a pivot for "NODE_FMT"\n", __func__, NODE_ARG(target));
-		return -EINVAL;
-	}
-	if (!is_mapping(pivot)) {
-		pr_err("%s: pivot "NODE_FMT" not a mapping\n", __func__, NODE_ARG(pivot));
 		return -EINVAL;
 	}
 
@@ -831,24 +793,12 @@ int sptree_rrl(struct sptree_root *root, unsigned long addr)
 	BUG_ON(!target);
 
 	// validate the node
-	if (!is_mapping(target)) {
-		pr_err("found node "NODE_FMT", not a mapping\n", NODE_ARG(target));
-		return -EINVAL;
-	}
 	if (!target->right) {
 		pr_err("node too low\n");
 		return -EINVAL;
 	}
-	if (!is_mapping(target->right)) {
-		pr_err("pivot not a mapping\n");
-		return -EINVAL;
-	}
 	if (!target->right->left) {
 		pr_err("node too low\n");
-		return -EINVAL;
-	}
-	if (!is_mapping(target->right->left)) {
-		pr_err("pivot not a mapping\n");
 		return -EINVAL;
 	}
 
@@ -905,24 +855,12 @@ int sptree_rlr(struct sptree_root *root, unsigned long addr)
 	BUG_ON(!target);
 
 	// validate the node
-	if (!is_mapping(target)) {
-		pr_err("found node "NODE_FMT", not a mapping\n", NODE_ARG(target));
-		return -EINVAL;
-	}
 	if (!target->left) {
 		pr_err("node too low\n");
 		return -EINVAL;
 	}
-	if (!is_mapping(target->left)) {
-		pr_err("pivot not a mapping\n");
-		return -EINVAL;
-	}
 	if (!target->left->right) {
 		pr_err("node too low\n");
-		return -EINVAL;
-	}
-	if (!is_mapping(target->left->right)) {
-		pr_err("pivot not a mapping\n");
 		return -EINVAL;
 	}
 
@@ -1228,7 +1166,7 @@ static int standard_retrace(struct sptree_root *root, struct sptree_node *node)
  * @addr:	Address of the node
  *
  * Inserts a node in a tree at @addr. The insertion is RCU-safe
- * by default. Marks it as a mapping for backward compliance.
+ * by default.
  *
  * Returns 0 on success or -E... on failure.
  */
@@ -1262,7 +1200,6 @@ int standard_insert(struct sptree_root *root, unsigned long addr)
 
 	node->start = addr;
 	node->length = PAGE_SIZE;
-	node->mapping = true;
 
 	// reverse, then direct link
 	WRITE_ONCE(node->parent, parent);
@@ -1272,155 +1209,6 @@ int standard_insert(struct sptree_root *root, unsigned long addr)
 
 	// TODO: remove once code stable
 	validate_avl_balancing(root);
-
-	return 0;
-}
-
-
-/**
- * interval_retrace() - custom retracing for splitting case
- * @root:	Root of the tree
- * @node:	Node where retracing begins
- *
- * This differs from the standard retracing algorithm because a subtree is
- * inserted at the end, and a rotation may not always balance the subtree.
- * So retracing is not stopped after the first rotation.
- *
- * Returns 0 for success or -ENOMEM if rotations fail.
- */
-static int interval_retrace(struct sptree_root *root, struct sptree_node *node)
-{
-	// ...
-
-	return 0;
-}
-
-/**
- * interval_alloc_subtree() - creates a subtree centered on addr
- * @node:	A leaf node (interval) from within the tree
- * @addr:	Address where splitting is done
- *
- * The created subtree represents the same interval with a split at @addr.
- * The subtree may be degenerate or just a node if @addr represents
- * the starting/ending page of the interval (or both).
- *
- * Returns the root of the subtree or NULL if allocation failed.
- */
-static struct sptree_node *interval_alloc_subtree(struct sptree_node *node, unsigned long addr)
-{
-	struct sptree_node *subtree_root = NULL;
-	struct sptree_node *subtree_left = NULL;
-	struct sptree_node *subtree_right = NULL;
-
-	pr_info("%s: splitting "NODE_FMT" at %lx\n", __func__, NODE_ARG(node), addr);
-
-	// a mapping can also be a leaf if it replaced a segment of same size...
-	// ...but a segment can't be a node
-	BUG_ON(!is_leaf(node));
-	BUG_ON(is_mapping(node));
-
-	// this will be the mapping
-	subtree_root = kzalloc(sizeof(*subtree_root), GFP_ATOMIC);
-	if (!subtree_root)
-		return NULL;
-
-	subtree_root->start = addr;
-	subtree_root->length = PAGE_SIZE;
-	subtree_root->mapping = true;
-
-	// first page in range
-	if (addr != node->start) {
-		subtree_left = kzalloc(sizeof(*subtree_left), GFP_ATOMIC);
-		if (!subtree_left)
-			goto error;
-
-		subtree_left->start = node->start;
-		subtree_left->length = addr - node->start;
-
-		subtree_root->balancing -= 1;
-		subtree_root->left = subtree_left;
-		subtree_left->parent = make_left(subtree_root);
-
-		pr_info("%s: to the left we have "NODE_FMT"\n", __func__, NODE_ARG(subtree_left));
-	}
-
-	// last page in range
-	if (addr != node->start + node->length - PAGE_SIZE) {
-		subtree_right = kzalloc(sizeof(*subtree_right), GFP_ATOMIC);
-		if (!subtree_right)
-			goto error;
-
-		subtree_right->start = addr + PAGE_SIZE;
-		subtree_right->length = node->length - (addr - node->start + PAGE_SIZE);
-
-		subtree_root->balancing += 1;
-		subtree_root->right = subtree_right;
-		subtree_right->parent = make_right(subtree_root);
-
-		pr_info("%s: to the right we have "NODE_FMT"\n", __func__, NODE_ARG(subtree_right));
-	}
-
-	return subtree_root;
-
-error:
-	if (subtree_root)
-		kfree(subtree_root);
-	if (subtree_left)
-		kfree(subtree_left);
-	if (subtree_right)
-		kfree(subtree_right);
-
-	return NULL;
-}
-
-/**
- * interval_insert() - inserts a mapping in an address interval
- * @root:	The root of the tree
- * @addr:	Address where splitting is done
- *
- * Finds the node containing @addr and splits it into a subtree.
- * The subtree replaces the node in a RCU-safe manner.
- *
- * Returns 0 on success or -E... on failure.
- */
-int interval_insert(struct sptree_root *root, unsigned long addr)
-{
-	struct sptree_node *target, *parent;
-	struct sptree_node **ptarget;
-	struct sptree_node *subtree;
-
-	if (!address_valid(root, addr))
-		return -EINVAL;
-
-	target = search(root, addr);
-	BUG_ON(!target);
-
-	// validate the node
-	if (is_mapping(target))
-		return -EALREADY;
-
-	// alloc & insert subtree
-	subtree = interval_alloc_subtree(target, addr);
-	if (!subtree)
-		return -ENOMEM;
-
-	// may contain L/R flags or NULL
-	parent = READ_ONCE(target->parent);
-	ptarget = get_pnode(root, parent);
-
-	// reverse, then direct link
-	WRITE_ONCE(subtree->parent, parent);
-	WRITE_ONCE(*ptarget, subtree);
-
-	// rebalance tree if the subtree has depth != 1
-	if (!is_leaf(subtree))
-		interval_retrace(root, subtree);
-
-	// TODO: remove once code stable
-	validate_avl_balancing(root);
-
-	// finally free the replaced node
-	kfree_rcu(target, rcu);
 
 	return 0;
 }
@@ -1449,14 +1237,14 @@ static void delete_leaf(struct sptree_node *node, struct sptree_node **pnode)
 }
 
 /**
- * sptree_delete() - deletes a mapping from an address interval
+ * sptree_delete() - deletes a node from an address interval
  * @root:	The root of the tree
- * @addr:	Mapping address
+ * @addr:	Address of the node
  *
- * Finds the mapping at @addr and merges it with the successor
- * and/or predesessor intervals to form a new interval.
- * The new interval (a node) replaces the subtree centered at
- * @addr in a RCU-safe manner.
+ * Finds the node at @addr and moves it to the bottom of the tree
+ * through successive rotations. Then deletes it (RCU safe).
+ * The AVL properties of the tree may be broken in the process,
+ * but are fixed after deletion.
  *
  * Returns 0 on success or -E... on failure.
  */
@@ -1497,4 +1285,3 @@ int sptree_delete(struct sptree_root *root, unsigned long addr)
 }
 
 // TODO: BUG_ON(!target) after target = search(root, addr) should be an error, not a BUG
-// TODO: remove sptree_node->mapping field & interval_xxx() functions

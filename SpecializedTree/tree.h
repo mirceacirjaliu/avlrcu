@@ -8,7 +8,6 @@
 struct sptree_node {
 	unsigned long start;
 	size_t length;
-	bool mapping;		// TODO: just for assertions, remove later
 	int balancing;
 
 	struct sptree_node *parent;
@@ -30,11 +29,6 @@ struct sptree_root {
 #define LEFT_CHILD 1
 
 #define PARENT_FLAGS 1
-
-static inline bool is_mapping(struct sptree_node *node)
-{
-	return node->mapping;
-}
 
 static inline bool is_leaf(struct sptree_node *node)
 {
@@ -134,7 +128,6 @@ extern void sptree_iter_next_po(struct sptree_iterator *iter);
 
 
 extern int standard_init(struct sptree_root *root, unsigned long start, size_t length);
-extern int interval_init(struct sptree_root *root, unsigned long start, size_t length);
 extern void sptree_free(struct sptree_root *root);
 
 // helper for operations on an address
@@ -150,7 +143,6 @@ static inline bool address_valid(struct sptree_root *root, unsigned long addr)
 
 // these 2 must be protected by a lock
 extern int standard_insert(struct sptree_root *root, unsigned long addr);
-extern int interval_insert(struct sptree_root *root, unsigned long addr);
 extern int sptree_delete(struct sptree_root *root, unsigned long addr);
 
 // same for these

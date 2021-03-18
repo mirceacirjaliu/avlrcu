@@ -51,28 +51,24 @@ static void validate_greater(struct sptree_root *root)
 		pr_err("%s: invalid order detected\n", __func__);
 }
 
-static void validate_nodes(struct sptree_root *root)
-{
-	struct sptree_iterator iter;
-	int result = 0;
-
-	rcu_read_lock();
-
-	sptree_for_each_node_io(&iter, root) {
-		struct sptree_node *node = iter.node;
-
-		// a node can't be a segment
-		if (!node->mapping && (node->left || node->right)) {
-			result = -EINVAL;
-			break;
-		}
-	}
-
-	rcu_read_unlock();
-
-	if (result)
-		pr_err("%s: invalid node detected\n", __func__);
-}
+//static void validate_nodes(struct sptree_root *root)
+//{
+//	struct sptree_iterator iter;
+//	int result = 0;
+//
+//	rcu_read_lock();
+//
+//	sptree_for_each_node_io(&iter, root) {
+//		struct sptree_node *node = iter.node;
+//
+//		// ...
+//	}
+//
+//	rcu_read_unlock();
+//
+//	if (result)
+//		pr_err("%s: invalid node detected\n", __func__);
+//}
 
 static int validator_func(void *arg)
 {
@@ -82,11 +78,7 @@ static int validator_func(void *arg)
 		// validate each element is greater than the last
 		validate_greater(&sptree_range);
 
-		// a leaf is part of the initial sptree_range (or whole if no mappings)
-		// otherwise a node (has children) is a mapping
-		// a leaf can also be a mapping if surrounded by other mappings
-		// a node can't be a free-sptree_range
-		validate_nodes(&sptree_range);
+		//validate_nodes(&sptree_range);
 
 		msleep_interruptible(1000);
 
@@ -386,7 +378,7 @@ static int dump_gv_show(struct seq_file *s, void *v)
 
 	seq_printf(s, "\tn%lx [label=\"%lx - %lx\\n%d\", style=filled, fillcolor=%s]\n",
 		(unsigned long)node, node->start, node->start + node->length,
-		node->balancing, node->mapping ? "red" : "green");
+		node->balancing, "green");
 
 	if (left)
 		seq_printf(s, "\tn%lx -> n%lx [tailport=w]\n",
@@ -484,13 +476,12 @@ static int dump_po_show(struct seq_file *s, void *v)
 	struct sptree_iterator *iter = s->private;
 	struct sptree_node *node = iter->node;
 
-	// we must still enter here, case the flow control in seq_file.c won't
+	// we must still enter here, cause the flow control in seq_file.c won't
 	// print the header & footer in case ..._start() returns NULL
 	if (node == NULL)
 		return 0;
 
-	if (node->mapping)
-		seq_printf(s, "%lx\n", node->start);
+	seq_printf(s, "%lx\n", node->start);
 
 	return 0;
 }
