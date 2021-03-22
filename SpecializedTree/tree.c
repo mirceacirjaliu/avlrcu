@@ -1101,7 +1101,7 @@ static int standard_retrace(struct sptree_root *root, struct sptree_node *node)
 		pr_info("%s: loop on parent "NODE_FMT", node is "NODE_FMT"\n", __func__,
 			NODE_ARG(strip_flag(parent)), NODE_ARG(node));
 
-		// may contain L/R flags or NULL
+		// grandparent, may contain L/R flags or NULL
 		gparent = READ_ONCE(strip_flag(parent)->parent);
 		pparent = get_pnode(root, gparent);
 
@@ -1386,7 +1386,17 @@ static struct sptree_node *unwind_double(struct sptree_root *root, struct sptree
 	return NULL;
 }
 
-static struct sptree_node *unwind(struct sptree_root *root, struct sptree_node *target)
+/**
+ * unwind_avl() - the unwind algorith
+ * @root:	Root of the tree
+ * @target:	Node where fixing begins
+ *
+ * Bubbles the target node down the tree to a leaf position where it can be deleted.
+ * The node has to take the shortest path, to minimize the number of rotations.
+ *
+ * TODO: Returns 0 for success or -ENOMEM if rotations fail.
+ */
+static struct sptree_node *unwind_avl(struct sptree_root *root, struct sptree_node *target)
 {
 	pr_info("%s: at "NODE_FMT"\n", __func__, NODE_ARG(target));
 
@@ -1418,6 +1428,39 @@ static struct sptree_node *unwind(struct sptree_root *root, struct sptree_node *
 	} while (target != NULL && !is_leaf(target));
 
 	return target;
+}
+
+/**
+ * fix_avl() - fix the unbalancing caused by the unwinding algorithm
+ * @root:	Root of the tree
+ * @target:	Node where fixing begins
+ *
+ * Undoes any reverse double rotations done by unwind.
+ *
+ * TODO: Returns 0 for success or -ENOMEM if rotations fail.
+ * TODO: can stop at the parent of the initial target, everything above is OK
+ */
+static void fix_avl(struct sptree_root *root, struct sptree_node *target)
+{
+	struct sptree_node *parent, **ptarget;
+
+	for (; target != NULL; target = strip_flag(target->parent)) {
+
+		pr_info("%s: currently on target "NODE_FMT"\n",
+			__func__, NODE_ARG(target));
+
+		if (target->balancing >= -1 && target->balancing <= 1)
+			continue;
+
+		// may contain L/R flags or NULL
+		parent = READ_ONCE(target->parent);
+		ptarget = get_pnode(root, parent);
+
+		if (target->balancing == -2)
+			target = rotate_left_right_generic(target, ptarget);
+		else
+			target = rotate_right_left_generic(target, ptarget);
+	}
 }
 
 /**
@@ -1468,7 +1511,7 @@ int sptree_delete(struct sptree_root *root, unsigned long addr)
 
 	// unwinding algorithm, target goes down the tree
 	if (!is_leaf(target))
-		target = unwind(root, target);
+		target = unwind_avl(root, target);
 
 	// may contain L/R flags or NULL
 	parent = READ_ONCE(target->parent);
@@ -1477,8 +1520,10 @@ int sptree_delete(struct sptree_root *root, unsigned long addr)
 	// call the internal delete function
 	delete_leaf(target, ptarget);
 
-	// TODO: walk up the branch & fix the tree
-	// fix(parent)
+	// walk up the branch & fix the tree
+	parent = strip_flag(parent);
+	if (!is_root(parent))
+		fix_avl(root, parent);
 
 	// TODO: remove once code stable
 	validate_avl_balancing(root);
