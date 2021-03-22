@@ -562,12 +562,19 @@ static int rol_height_diff(struct sptree_node *root)
 	return diff;
 }
 
+/**
+ * propagate_height_diff() - go up the branch & change balancing
+ * @subtree:	The subtree whose height has changed following a rotation/deletion.
+ *
+ * Under certain operations, the height of the subtree changes, and
+ * the changes must be propagated up to the root.
+ *
+ */
 static void propagate_height_diff(struct sptree_node *subtree, int diff)
 {
 	struct sptree_node *parent;
 	bool left;
 
-	// TODO: READ_ONCE(subtree->parent) ?
 	for (parent = subtree->parent; !is_root(parent); parent = parent->parent) {
 		left = is_left_child(parent);
 		parent = strip_flag(parent);
@@ -1433,18 +1440,21 @@ static struct sptree_node *unwind_avl(struct sptree_root *root, struct sptree_no
 /**
  * fix_avl() - fix the unbalancing caused by the unwinding algorithm
  * @root:	Root of the tree
- * @target:	Node where fixing begins
+ * @target:	Node where fixing begins (parent of deleted node)
+ * @stop:	Node where fixing ends (NULL for root)
  *
- * Undoes any reverse double rotations done by unwind.
+ * Walks up the branch & undoes any reverse double rotations done by unwind.
+ * The walk can stop at the previous parent of the deleted node, everything
+ * above is unaffected.
  *
  * TODO: Returns 0 for success or -ENOMEM if rotations fail.
- * TODO: can stop at the parent of the initial target, everything above is OK
  */
-static void fix_avl(struct sptree_root *root, struct sptree_node *target)
+static void fix_avl(struct sptree_root *root, struct sptree_node *target, struct sptree_node *stop)
 {
 	struct sptree_node *parent, **ptarget;
 
-	for (; target != NULL; target = strip_flag(target->parent)) {
+	for (; target != stop; target = strip_flag(target->parent)) {
+		BUG_ON(is_root(target));
 
 		pr_info("%s: currently on target "NODE_FMT"\n",
 			__func__, NODE_ARG(target));
@@ -1473,16 +1483,20 @@ static void fix_avl(struct sptree_root *root, struct sptree_node *target)
  * In the end the node represents an empty subtree rooted by itself (depth 1).
  * Since it goes away, the branch containing it must change balance.
  */
-static void delete_leaf(struct sptree_node *node, struct sptree_node **pnode)
+static void delete_leaf(struct sptree_root *root, struct sptree_node *target)
 {
-	pr_info("%s: deleting at "NODE_FMT"\n", __func__, NODE_ARG(node));
+	struct sptree_node **ptarget;
 
-	BUG_ON(!is_leaf(node));
+	pr_info("%s: deleting at "NODE_FMT"\n", __func__, NODE_ARG(target));
 
-	// this node/leaf represents the subtree that changes height
-	propagate_height_diff(node, -1);
+	BUG_ON(!is_leaf(target));
 
-	delete_leaf_rcu(node, pnode);
+	// go up the branch & change balance
+	propagate_height_diff(target, -1);
+
+	// parent may contain L/R flags or NULL
+	ptarget = get_pnode(root, target->parent);
+	delete_leaf_rcu(target, ptarget);
 }
 
 /**
@@ -1499,8 +1513,8 @@ static void delete_leaf(struct sptree_node *node, struct sptree_node **pnode)
  */
 int sptree_delete(struct sptree_root *root, unsigned long addr)
 {
-	struct sptree_node *target, *parent;
-	struct sptree_node **ptarget;
+	struct sptree_node *target;
+	struct sptree_node *parent_before, *parent_after;
 
 	if (!address_valid(root, addr))
 		return -EINVAL;
@@ -1509,24 +1523,25 @@ int sptree_delete(struct sptree_root *root, unsigned long addr)
 	if (!target)
 		return -ENXIO;
 
+	// parent before unwinding
+	parent_before = strip_flag(target->parent);
+
 	// unwinding algorithm, target goes down the tree
 	if (!is_leaf(target))
 		target = unwind_avl(root, target);
 
-	// may contain L/R flags or NULL
-	parent = READ_ONCE(target->parent);
-	ptarget = get_pnode(root, parent);
-
 	// call the internal delete function
-	delete_leaf(target, ptarget);
+	delete_leaf(root, target);
 
 	// walk up the branch & fix the tree
-	parent = strip_flag(parent);
-	if (!is_root(parent))
-		fix_avl(root, parent);
+	parent_after = strip_flag(target->parent);
+	if (!is_root(parent_after))
+		fix_avl(root, parent_after, parent_before);
 
 	// TODO: remove once code stable
 	validate_avl_balancing(root);
 
 	return 0;
 }
+
+// TODO: READ_ONCE() on write path is useless
