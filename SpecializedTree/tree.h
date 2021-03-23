@@ -55,7 +55,7 @@ static inline struct sptree_node *make_right(struct sptree_node *parent)
 	return (struct sptree_node *) ((unsigned long)parent & ~LEFT_CHILD);
 }
 
-static inline struct sptree_node *strip_flag(struct sptree_node *parent)
+static inline struct sptree_node *strip_flags(struct sptree_node *parent)
 {
 	return (struct sptree_node *) ((unsigned long)parent & ~PARENT_FLAGS);
 }
@@ -66,9 +66,9 @@ static inline struct sptree_node **get_pnode(struct sptree_root *root, struct sp
 	if (is_root(parent))
 		return &root->root;
 	else if (is_left_child(parent))
-		return &strip_flag(parent)->left;
+		return &strip_flags(parent)->left;
 	else
-		return &strip_flag(parent)->right;
+		return &strip_flags(parent)->right;
 }
 
 /* For dumping purposes. */

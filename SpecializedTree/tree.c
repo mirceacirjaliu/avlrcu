@@ -171,7 +171,7 @@ void sptree_iter_next_io(struct sptree_iterator *iter)
 
 		case ITER_RIGHT:				// comes from right subtree / handled case
 			next = READ_ONCE(iter->node->parent);	// may contain L/R flags
-			iter->node = strip_flag(next);		// goes up anyway
+			iter->node = strip_flags(next);		// goes up anyway
 
 			if (is_root(next)) {
 				iter->state = ITER_DONE;
@@ -233,7 +233,7 @@ void sptree_iter_next_po(struct sptree_iterator *iter)
 
 		case ITER_RIGHT:
 			next = READ_ONCE(iter->node->parent);	// may contain L/R flags
-			iter->node = strip_flag(next);		// goes up anyway
+			iter->node = strip_flags(next);		// goes up anyway
 
 			if (is_root(next)) {
 				iter->state = ITER_DONE;
@@ -575,9 +575,10 @@ static void propagate_height_diff(struct sptree_node *subtree, int diff)
 	struct sptree_node *parent;
 	bool left;
 
+	// parent may contain L/R flags or NULL, strip flags before using as pointer
 	for (parent = subtree->parent; !is_root(parent); parent = parent->parent) {
 		left = is_left_child(parent);
-		parent = strip_flag(parent);
+		parent = strip_flags(parent);
 
 		if (left)
 			parent->balancing -= diff;
@@ -637,8 +638,7 @@ static struct sptree_node *rotate_right_generic(struct sptree_node *root, struct
 
 int sptree_ror(struct sptree_root *root, unsigned long addr)
 {
-	struct sptree_node *target, *parent;
-	struct sptree_node **ptarget;
+	struct sptree_node *target, **ptarget;
 	struct sptree_node *pivot;
 	struct sptree_node *new_root;
 
@@ -665,9 +665,8 @@ int sptree_ror(struct sptree_root *root, unsigned long addr)
 	//	return -EINVAL;
 	//}
 
-	// may contain L/R flags or NULL
-	parent = READ_ONCE(target->parent);
-	ptarget = get_pnode(root, parent);
+	// parent may contain L/R flags or NULL
+	ptarget = get_pnode(root, target->parent);
 
 	new_root = rotate_right_generic(target, ptarget);
 	if (!new_root)
@@ -727,8 +726,7 @@ static struct sptree_node *rotate_left_generic(struct sptree_node *root, struct 
 
 int sptree_rol(struct sptree_root *root, unsigned long addr)
 {
-	struct sptree_node *target, *parent;
-	struct sptree_node **ptarget;
+	struct sptree_node *target, **ptarget;
 	struct sptree_node *pivot;
 	struct sptree_node *new_root;
 
@@ -755,9 +753,8 @@ int sptree_rol(struct sptree_root *root, unsigned long addr)
 	//	return -EINVAL;
 	//}
 
-	// may contain L/R flags or NULL
-	parent = READ_ONCE(target->parent);
-	ptarget = get_pnode(root, parent);
+	// parent may contain L/R flags or NULL
+	ptarget = get_pnode(root, target->parent);
 
 	new_root = rotate_left_generic(target, ptarget);
 	if (!new_root)
@@ -798,8 +795,7 @@ static struct sptree_node *rotate_right_left_generic(struct sptree_node *root, s
 
 int sptree_rrl(struct sptree_root *root, unsigned long addr)
 {
-	struct sptree_node *target, *parent;
-	struct sptree_node **ptarget;
+	struct sptree_node *target, **ptarget;
 	struct sptree_node *subtree;
 
 	if (!address_valid(root, addr))
@@ -819,9 +815,8 @@ int sptree_rrl(struct sptree_root *root, unsigned long addr)
 		return -EINVAL;
 	}
 
-	// may contain L/R flags or NULL
-	parent = READ_ONCE(target->parent);
-	ptarget = get_pnode(root, parent);
+	// parent may contain L/R flags or NULL
+	ptarget = get_pnode(root, target->parent);
 
 	subtree = rotate_right_left_generic(target, ptarget);
 	if (!subtree)
@@ -861,8 +856,7 @@ static struct sptree_node *rotate_left_right_generic(struct sptree_node *root, s
 
 int sptree_rlr(struct sptree_root *root, unsigned long addr)
 {
-	struct sptree_node *target, *parent;
-	struct sptree_node **ptarget;
+	struct sptree_node *target, **ptarget;
 	struct sptree_node *subtree;
 
 	if (!address_valid(root, addr))
@@ -882,9 +876,8 @@ int sptree_rlr(struct sptree_root *root, unsigned long addr)
 		return -EINVAL;
 	}
 
-	// may contain L/R flags or NULL
-	parent = READ_ONCE(target->parent);
-	ptarget = get_pnode(root, parent);
+	// parent may contain L/R flags or NULL
+	ptarget = get_pnode(root, target->parent);
 
 	subtree = rotate_left_right_generic(target, ptarget);
 	if (!subtree)
@@ -1097,24 +1090,22 @@ static struct sptree_node *rotate_left_right_retrace(struct sptree_node *root, s
  */
 static int standard_retrace(struct sptree_root *root, struct sptree_node *node)
 {
-	struct sptree_node *parent, *gparent;
-	struct sptree_node **pparent;
+	struct sptree_node *parent, **pparent;
 
 	pr_info("%s: starting at "NODE_FMT"\n", __func__, NODE_ARG(node));
 
-	for (parent = READ_ONCE(node->parent); parent != NULL; node = parent, parent = READ_ONCE(node->parent)) {
+	for (parent = node->parent; parent != NULL; node = parent, parent = node->parent) {
 
 		// parent pointer may contain left/right flag
 		pr_info("%s: loop on parent "NODE_FMT", node is "NODE_FMT"\n", __func__,
-			NODE_ARG(strip_flag(parent)), NODE_ARG(node));
+			NODE_ARG(strip_flags(parent)), NODE_ARG(node));
 
 		// grandparent, may contain L/R flags or NULL
-		gparent = READ_ONCE(strip_flag(parent)->parent);
-		pparent = get_pnode(root, gparent);
+		pparent = get_pnode(root, strip_flags(parent)->parent);
 
 		if (is_left_child(parent)) {			// node is left child of parent
 			// fix parent pointer
-			parent = strip_flag(parent);
+			parent = strip_flags(parent);
 
 			pr_info("%s: node "NODE_FMT" is left child of "NODE_FMT"\n", __func__,
 				NODE_ARG(node), NODE_ARG(parent));
@@ -1147,7 +1138,7 @@ static int standard_retrace(struct sptree_root *root, struct sptree_node *node)
 		}
 		else {						// node is right child of parent
 			// fix parent pointer
-			parent = strip_flag(parent);
+			parent = strip_flags(parent);
 
 			pr_info("%s: node "NODE_FMT" is right child of "NODE_FMT"\n", __func__,
 				NODE_ARG(node), NODE_ARG(parent));
@@ -1240,8 +1231,7 @@ int standard_insert(struct sptree_root *root, unsigned long addr)
 
 static struct sptree_node *unwind_left(struct sptree_root *root, struct sptree_node *target)
 {
-	struct sptree_node *pivot, *parent;
-	struct sptree_node **ptarget;
+	struct sptree_node *pivot, **ptarget;
 	struct sptree_node *subtree_root;
 
 	pr_info("%s: at "NODE_FMT"\n", __func__, NODE_ARG(target));
@@ -1249,9 +1239,8 @@ static struct sptree_node *unwind_left(struct sptree_root *root, struct sptree_n
 	pivot = target->right;
 	BUG_ON(!pivot);
 
-	// may contain L/R flags or NULL
-	parent = READ_ONCE(target->parent);
-	ptarget = get_pnode(root, parent);
+	// parent may contain L/R flags or NULL
+	ptarget = get_pnode(root, target->parent);
 
 	if (pivot->balancing == -1)
 		subtree_root = rotate_right_left_generic(target, ptarget);
@@ -1265,8 +1254,7 @@ static struct sptree_node *unwind_left(struct sptree_root *root, struct sptree_n
 
 static struct sptree_node *unwind_right(struct sptree_root *root, struct sptree_node *target)
 {
-	struct sptree_node *pivot, *parent;
-	struct sptree_node **ptarget;
+	struct sptree_node *pivot, **ptarget;
 	struct sptree_node *subtree_root;
 
 	pr_info("%s: at "NODE_FMT"\n", __func__, NODE_ARG(target));
@@ -1274,9 +1262,8 @@ static struct sptree_node *unwind_right(struct sptree_root *root, struct sptree_
 	pivot = target->left;
 	BUG_ON(!pivot);
 
-	// may contain L/R flags or NULL
-	parent = READ_ONCE(target->parent);
-	ptarget = get_pnode(root, parent);
+	// parent may contain L/R flags or NULL
+	ptarget = get_pnode(root, target->parent);
 
 	if (pivot->balancing == 1)
 		subtree_root = rotate_left_right_generic(target, ptarget);
@@ -1290,22 +1277,20 @@ static struct sptree_node *unwind_right(struct sptree_root *root, struct sptree_
 
 static struct sptree_node *reverse_rrl(struct sptree_root *root, struct sptree_node *target)
 {
-	struct sptree_node *parent, **ptarget;
+	struct sptree_node **ptarget;
 	struct sptree_node *subtree_root;
 
 	pr_info("%s: at "NODE_FMT"\n", __func__, NODE_ARG(target));
 
-	// may contain L/R flags or NULL
-	parent = READ_ONCE(target->parent);
-	ptarget = get_pnode(root, parent);
+	// parent may contain L/R flags or NULL
+	ptarget = get_pnode(root, target->parent);
 
 	// rotation functions return the new subtree root
 	subtree_root = rotate_right_generic(target, ptarget);
 	target = subtree_root->right;
 
-	// may contain L/R flags or NULL
-	parent = READ_ONCE(target->parent);
-	ptarget = get_pnode(root, parent);
+	// parent may contain L/R flags or NULL
+	ptarget = get_pnode(root, target->parent);
 
 	// rotation functions return the new subtree root
 	subtree_root = rotate_left_generic(target, ptarget);
@@ -1316,22 +1301,20 @@ static struct sptree_node *reverse_rrl(struct sptree_root *root, struct sptree_n
 
 static struct sptree_node *reverse_rlr(struct sptree_root *root, struct sptree_node *target)
 {
-	struct sptree_node *parent, **ptarget;
+	struct sptree_node **ptarget;
 	struct sptree_node *subtree_root;
 
 	pr_info("%s: at "NODE_FMT"\n", __func__, NODE_ARG(target));
 
-	// may contain L/R flags or NULL
-	parent = READ_ONCE(target->parent);
-	ptarget = get_pnode(root, parent);
+	// parent may contain L/R flags or NULL
+	ptarget = get_pnode(root, target->parent);
 
 	// rotation functions return the new subtree root
 	subtree_root = rotate_left_generic(target, ptarget);
 	target = subtree_root->left;
 
-	// may contain L/R flags or NULL
-	parent = READ_ONCE(target->parent);
-	ptarget = get_pnode(root, parent);
+	// parent may contain L/R flags or NULL
+	ptarget = get_pnode(root, target->parent);
 
 	// rotation functions return the new subtree root
 	subtree_root = rotate_right_generic(target, ptarget);
@@ -1451,9 +1434,9 @@ static struct sptree_node *unwind_avl(struct sptree_root *root, struct sptree_no
  */
 static void fix_avl(struct sptree_root *root, struct sptree_node *target, struct sptree_node *stop)
 {
-	struct sptree_node *parent, **ptarget;
+	struct sptree_node **ptarget;
 
-	for (; target != stop; target = strip_flag(target->parent)) {
+	for (; target != stop; target = strip_flags(target->parent)) {
 		BUG_ON(is_root(target));
 
 		pr_info("%s: currently on target "NODE_FMT"\n",
@@ -1462,9 +1445,8 @@ static void fix_avl(struct sptree_root *root, struct sptree_node *target, struct
 		if (target->balancing >= -1 && target->balancing <= 1)
 			continue;
 
-		// may contain L/R flags or NULL
-		parent = READ_ONCE(target->parent);
-		ptarget = get_pnode(root, parent);
+		// parent may contain L/R flags or NULL
+		ptarget = get_pnode(root, target->parent);
 
 		if (target->balancing == -2)
 			target = rotate_left_right_generic(target, ptarget);
@@ -1496,6 +1478,7 @@ static void delete_leaf(struct sptree_root *root, struct sptree_node *target)
 
 	// parent may contain L/R flags or NULL
 	ptarget = get_pnode(root, target->parent);
+
 	delete_leaf_rcu(target, ptarget);
 }
 
@@ -1524,7 +1507,7 @@ int sptree_delete(struct sptree_root *root, unsigned long addr)
 		return -ENXIO;
 
 	// parent before unwinding
-	parent_before = strip_flag(target->parent);
+	parent_before = strip_flags(target->parent);
 
 	// unwinding algorithm, target goes down the tree
 	if (!is_leaf(target))
@@ -1534,7 +1517,7 @@ int sptree_delete(struct sptree_root *root, unsigned long addr)
 	delete_leaf(root, target);
 
 	// walk up the branch & fix the tree
-	parent_after = strip_flag(target->parent);
+	parent_after = strip_flags(target->parent);
 	if (!is_root(parent_after))
 		fix_avl(root, parent_after, parent_before);
 
@@ -1543,5 +1526,3 @@ int sptree_delete(struct sptree_root *root, unsigned long addr)
 
 	return 0;
 }
-
-// TODO: READ_ONCE() on write path is useless

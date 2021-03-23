@@ -396,11 +396,11 @@ static int dump_gv_show(struct seq_file *s, void *v)
 	}
 	else if (is_left_child(parent)) {
 		seq_printf(s, "\tn%lx -> n%lx [headport=w, tailport=n, style=dotted, color=lightgrey]\n",
-			(unsigned long)node, (unsigned long)strip_flag(parent));
+			(unsigned long)node, (unsigned long)strip_flags(parent));
 	}
 	else {
 		seq_printf(s, "\tn%lx -> n%lx [headport=e, tailport=n, style=dotted, color=lightgrey]\n",
-			(unsigned long)node, (unsigned long)strip_flag(parent));
+			(unsigned long)node, (unsigned long)strip_flags(parent));
 	}
 
 	return 0;
