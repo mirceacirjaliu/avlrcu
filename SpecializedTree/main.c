@@ -19,7 +19,7 @@
 
 // the object we test
 static struct sptree_root sptree_range;
-static DEFINE_SPINLOCK(lock);
+//static DEFINE_SPINLOCK(lock);
 
 // thread control
 static struct task_struct *validator;
@@ -112,9 +112,9 @@ static ssize_t insert_map(struct file *file, const char __user *data, size_t cou
 		return -EINVAL;
 	}
 
-	spin_lock(&lock);
-	result = standard_insert(&sptree_range, value);
-	spin_unlock(&lock);
+	//spin_lock(&lock);
+	result = prealloc_insert(&sptree_range, value);
+	//spin_unlock(&lock);
 
 	if (result == 0)
 		pr_info("%s: success\n", __func__);
@@ -149,9 +149,9 @@ static ssize_t delete_map(struct file *file, const char __user *data, size_t cou
 		return -EINVAL;
 	}
 
-	spin_lock(&lock);
+	//spin_lock(&lock);
 	result = sptree_delete(&sptree_range, value);
-	spin_unlock(&lock);
+	//spin_unlock(&lock);
 
 	if (result == 0)
 		pr_info("%s: success\n", __func__);
@@ -201,9 +201,9 @@ static ssize_t ror_map(struct file *file, const char __user *data, size_t count,
 		return -EINVAL;
 	}
 
-	spin_lock(&lock);
+	//spin_lock(&lock);
 	result = sptree_ror(&sptree_range, value);
-	spin_unlock(&lock);
+	//spin_unlock(&lock);
 
 	if (result == 0)
 		pr_info("%s: success\n", __func__);
@@ -238,9 +238,9 @@ static ssize_t rol_map(struct file *file, const char __user *data, size_t count,
 		return -EINVAL;
 	}
 
-	spin_lock(&lock);
+	//spin_lock(&lock);
 	result = sptree_rol(&sptree_range, value);
-	spin_unlock(&lock);
+	//spin_unlock(&lock);
 
 	if (result == 0)
 		pr_info("%s: success\n", __func__);
@@ -275,9 +275,9 @@ static ssize_t rrl_map(struct file *file, const char __user *data, size_t count,
 		return -EINVAL;
 	}
 
-	spin_lock(&lock);
+	//spin_lock(&lock);
 	result = sptree_rrl(&sptree_range, value);
-	spin_unlock(&lock);
+	//spin_unlock(&lock);
 
 	if (result == 0)
 		pr_info("%s: success\n", __func__);
@@ -312,9 +312,9 @@ static ssize_t rlr_map(struct file *file, const char __user *data, size_t count,
 		return -EINVAL;
 	}
 
-	spin_lock(&lock);
+	//spin_lock(&lock);
 	result = sptree_rlr(&sptree_range, value);
-	spin_unlock(&lock);
+	//spin_unlock(&lock);
 
 	if (result == 0)
 		pr_info("%s: success\n", __func__);

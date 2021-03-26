@@ -8,13 +8,25 @@
 struct sptree_node {
 	unsigned long start;
 	size_t length;
-	int balancing;
 
 	struct sptree_node *parent;
 	struct sptree_node *left;
 	struct sptree_node *right;
 
-	struct rcu_head rcu;
+	union {
+		struct rcu_head rcu;
+
+		struct {
+			/* current node is part of the preallocated branch and will replace an old node */
+			struct sptree_node *old;
+
+			// TODO: in case of all levels balanced, a lot of reverse double rotations will be needed
+			// TODO: this will propagate a lot of unbalancing along the branch & this number mai increase/decrease
+			// TODO: must find a way not to overflow this variable
+			int balancing : 15;
+			int new_branch : 1;
+		};
+	};
 };
 
 struct sptree_root {
@@ -47,17 +59,17 @@ static inline bool is_left_child(struct sptree_node *parent)
 
 static inline struct sptree_node *make_left(struct sptree_node *parent)
 {
-	return (struct sptree_node *) ((unsigned long)parent | LEFT_CHILD);
+	return (struct sptree_node *)((unsigned long)parent | LEFT_CHILD);
 }
 
 static inline struct sptree_node *make_right(struct sptree_node *parent)
 {
-	return (struct sptree_node *) ((unsigned long)parent & ~LEFT_CHILD);
+	return (struct sptree_node *)((unsigned long)parent & ~LEFT_CHILD);
 }
 
 static inline struct sptree_node *strip_flags(struct sptree_node *parent)
 {
-	return (struct sptree_node *) ((unsigned long)parent & ~PARENT_FLAGS);
+	return (struct sptree_node *)((unsigned long)parent & ~PARENT_FLAGS);
 }
 
 /* Returns the address of the pointer pointing to current node based on node->parent. */
@@ -69,6 +81,11 @@ static inline struct sptree_node **get_pnode(struct sptree_root *root, struct sp
 		return &strip_flags(parent)->left;
 	else
 		return &strip_flags(parent)->right;
+}
+
+static inline bool is_new_branch(struct sptree_node *node)
+{
+	return !!node->new_branch;
 }
 
 /* For dumping purposes. */
@@ -143,6 +160,7 @@ static inline bool address_valid(struct sptree_root *root, unsigned long addr)
 
 // these 2 must be protected by a lock
 extern int standard_insert(struct sptree_root *root, unsigned long addr);
+extern int prealloc_insert(struct sptree_root *root, unsigned long addr);
 extern int sptree_delete(struct sptree_root *root, unsigned long addr);
 
 // same for these
