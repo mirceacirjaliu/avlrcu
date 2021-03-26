@@ -1371,13 +1371,6 @@ static struct sptree_node *rotate_right_left_prealloc(struct sptree_node *root)
 	BUG_ON(!is_new_branch(right));
 	BUG_ON(!is_new_branch(left));
 
-	/*new_root = rotate_right_left_rcu(root, proot);
-	if (!new_root)
-		return NULL;
-
-	new_left = new_root->left;
-	new_right = new_root->right;*/
-
 	// redistribute t2, t3
 	new_left->right = left->left;
 	if (left->left && is_new_branch(left->left))
@@ -1430,10 +1423,6 @@ static struct sptree_node *precomputed_retrace(struct sptree_root *root, struct 
 		// parent pointer may contain left/right flag
 		pr_info("%s: loop on parent "NODE_FMT", node is "NODE_FMT"\n",
 			__func__, NODE_ARG(parent), NODE_ARG(node));
-
-		// parent of parent, may contain L/R flags or NULL
-		//pparent = get_pnode(root, parent->parent);
-		// TODO: don't need this, we're not connecting to grandparent
 
 		if (is_left_child(node->parent)) {
 			pr_info("%s: node "NODE_FMT" is left child of "NODE_FMT"\n", __func__,
@@ -1584,6 +1573,7 @@ error:
 	}
 	// TODO: in-order traversal on the branch & delete
 	// TODO: use a general-purpose function for that (that receives callbacks)
+	// TODO: the delete() code will create a tree segment that needs in-order traversal
 
 	return NULL;
 };
@@ -1641,14 +1631,10 @@ static void prealloc_connect(struct sptree_root *root, struct sptree_node *branc
 			if (next && is_new_branch(next)) {
 				if (is_left_child(io.node->parent))
 					io.state = ITER_LEFT;
-				//else
-				//	io.state = ITER_RIGHT;
-				//io.node = next;
 			}
 			else {
-				//io.node = NULL;
-				next = NULL;
-				io.state = ITER_DONE;
+				next = NULL;			// out of branch thru parent
+				io.state = ITER_DONE;		// done!
 			}
 
 			// delete old node before exiting this one
@@ -1656,21 +1642,22 @@ static void prealloc_connect(struct sptree_root *root, struct sptree_node *branc
 			io.node->old = NULL;
 			io.node->new_branch = 0;
 
-			io.node = next;
-			break;
+			io.node = next;				// finally move to parent
+			break;					// switch
 
 		default:
 			pr_warn("%s: unhandled iterator state\n", __func__);
-			io.node = NULL;			// cancels iteration
+			io.node = NULL;				// cancels iteration
+			io.state = ITER_DONE;
+			// TODO: BUG() or smth
 			break;
 		}
 	}
-
 }
 
 int prealloc_insert(struct sptree_root *root, unsigned long addr)
 {
-	struct sptree_node *crnt, *parent;// , **ptarget;
+	struct sptree_node *crnt, *parent;
 	struct sptree_node *node;
 	struct sptree_node *prealloc;
 
@@ -1678,23 +1665,18 @@ int prealloc_insert(struct sptree_root *root, unsigned long addr)
 		return -EINVAL;
 
 	/* look for a parent */
-	for (crnt = root->root, parent = NULL/*, pparent = &root->root*/; crnt != NULL; ) {
+	for (crnt = root->root, parent = NULL; crnt != NULL; ) {
 		if (unlikely(addr == crnt->start))
 			return -EINVAL;
 		else if (addr < crnt->start) {
 			parent = make_left(crnt);
-			/*pparent = &crnt->left;*/
 			crnt = crnt->left;
 		}
 		else {
 			parent = make_right(crnt);
-			/*pparent = &crnt->right;*/
 			crnt = crnt->right;
 		}
 	}
-
-	// parent may contain L/R flags or NULL
-	//ptarget = get_pnode(root, parent);
 
 	/* alloc the node & fill it - this is the first node in the preallocated branch */
 	node = kzalloc(sizeof(*node), GFP_ATOMIC);
@@ -1708,12 +1690,10 @@ int prealloc_insert(struct sptree_root *root, unsigned long addr)
 
 	/* retrace generates the preallocated branch */
 	prealloc = precomputed_retrace(root, node);
-	if (!prealloc) {
-		//kfree(node);
+	if (!prealloc)
 		return -ENOMEM;
-	}
 
-	// connect the preallocated branch (this must remove the replaced nodes)
+	// connect the preallocated branch (this will remove the replaced nodes)
 	prealloc_connect(root, prealloc);
 
 	// TODO: remove once code stable
