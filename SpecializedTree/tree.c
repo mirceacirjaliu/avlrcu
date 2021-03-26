@@ -1412,57 +1412,44 @@ static struct sptree_node *precomputed_retrace(struct sptree_root *root, struct 
 {
 	struct sptree_node *parent;
 	struct sptree_node *branch = node;
-	struct sptree_node *new_parent;
+	struct sptree_node *new_parent = NULL;
 
 	/* node is the latest member of branch */
 	pr_info("%s: starting at "NODE_FMT"\n", __func__, NODE_ARG(node));
 
-	// parent may contain L/R flags or NULL
 	for (parent = strip_flags(node->parent); parent != NULL; node = parent, parent = strip_flags(node->parent)) {
 
-		// parent pointer may contain left/right flag
 		pr_info("%s: loop on parent "NODE_FMT", node is "NODE_FMT"\n",
 			__func__, NODE_ARG(parent), NODE_ARG(node));
+
+		new_parent = kzalloc(sizeof(*new_parent), GFP_ATOMIC);
+		if (!new_parent)
+			goto error;
+
+		memcpy(new_parent, parent, sizeof(*new_parent));
+		new_parent->old = parent;					/* will replace this node */
+		new_parent->new_branch = 1;
 
 		if (is_left_child(node->parent)) {
 			pr_info("%s: node "NODE_FMT" is left child of "NODE_FMT"\n", __func__,
 				NODE_ARG(node), NODE_ARG(parent));
 
+			/* link top of branch to new parent */
+			new_parent->left = branch;
+			branch->parent = make_left(new_parent);
+
 			// parent is left-heavy
 			if (parent->balancing < 0) {
-				new_parent = kzalloc(sizeof(*new_parent), GFP_ATOMIC);
-				if (!new_parent)
-					goto error;
-
-				memcpy(new_parent, parent, sizeof(*new_parent));
-				new_parent->old = parent;			/* will replace this node */
-				new_parent->new_branch = 1;
-
-				new_parent->left = branch;
-				branch->parent = make_left(new_parent);		/* link node to parent */
-				//branch = new_parent;				/* push parent to branch */
-
 				// node is right-heavy
 				if (branch->balancing > 0)
 					branch = rotate_left_right_prealloc(new_parent);
 				else
 					branch = rotate_right_prealloc(new_parent);
-
 				break;
 			}
 			// parent is right-heavy
 			else if (parent->balancing > 0) {
-				new_parent = kzalloc(sizeof(*new_parent), GFP_ATOMIC);
-				if (!new_parent)
-					goto error;
-
-				memcpy(new_parent, parent, sizeof(*new_parent));
 				new_parent->balancing = 0;			/* parent becomes balanced */
-				new_parent->old = parent;			/* will replace this node */
-				new_parent->new_branch = 1;
-
-				new_parent->left = branch;
-				branch->parent = make_left(new_parent);		/* link node to parent */
 				branch = new_parent;				/* push parent to branch */
 
 				pr_info("%s: parent "NODE_FMT" becomes balanced, stop\n",
@@ -1471,17 +1458,7 @@ static struct sptree_node *precomputed_retrace(struct sptree_root *root, struct 
 			}
 			// parent is balanced
 			else {
-				new_parent = kzalloc(sizeof(*new_parent), GFP_ATOMIC);
-				if (!new_parent)
-					goto error;
-
-				memcpy(new_parent, parent, sizeof(*new_parent));
 				new_parent->balancing = -1;			/* parent becomes left-heavy */
-				new_parent->old = parent;			/* will replace this node */
-				new_parent->new_branch = 1;
-
-				new_parent->left = branch;
-				branch->parent = make_left(new_parent);		/* link node to parent */
 				branch = new_parent;				/* push parent to branch */
 
 				pr_info("%s: parent "NODE_FMT" becomes left-heavy, continue\n",
@@ -1493,41 +1470,22 @@ static struct sptree_node *precomputed_retrace(struct sptree_root *root, struct 
 			pr_info("%s: node "NODE_FMT" is right child of "NODE_FMT"\n", __func__,
 				NODE_ARG(node), NODE_ARG(parent));
 
+			/* link top of branch to new parent */
+			new_parent->right = branch;
+			branch->parent = make_right(new_parent);
+
 			// parent is right heavy
 			if (parent->balancing > 0) {
-				new_parent = kzalloc(sizeof(*new_parent), GFP_ATOMIC);
-				if (!new_parent)
-					goto error;
-
-				memcpy(new_parent, parent, sizeof(*new_parent));
-				new_parent->old = parent;			/* will replace this node */
-				new_parent->new_branch = 1;
-
-				new_parent->right = branch;
-				branch->parent = make_right(new_parent);	/* link node to parent */
-				//branch = new_parent;				/* push parent to branch */
-
 				// node is left-heavy
 				if (branch->balancing < 0)
 					branch = rotate_right_left_prealloc(new_parent);
 				else
 					branch = rotate_left_prealloc(new_parent);
-
 				break;
 			}
 			// parent is left-heavy
 			else if (parent->balancing < 0) {
-				new_parent = kzalloc(sizeof(*new_parent), GFP_ATOMIC);
-				if (!new_parent)
-					goto error;
-
-				memcpy(new_parent, parent, sizeof(*new_parent));
 				new_parent->balancing = 0;			/* parent becomes balanced */
-				new_parent->old = parent;			/* will replace this node */
-				new_parent->new_branch = 1;
-
-				new_parent->right = branch;
-				branch->parent = make_right(new_parent);	/* link node to parent */
 				branch = new_parent;				/* push parent to branch */
 
 				pr_info("%s: parent "NODE_FMT" becomes balanced, stop\n",
@@ -1536,17 +1494,7 @@ static struct sptree_node *precomputed_retrace(struct sptree_root *root, struct 
 			}
 			// parent is balanced
 			else {
-				new_parent = kzalloc(sizeof(*new_parent), GFP_ATOMIC);
-				if (!new_parent)
-					goto error;
-
-				memcpy(new_parent, parent, sizeof(*new_parent));
 				new_parent->balancing = 1;			/* parent becomes right-heavy */
-				new_parent->old = parent;			/* will replace this node */
-				new_parent->new_branch = 1;
-
-				new_parent->right = branch;
-				branch->parent = make_right(new_parent);	/* link node to parent */
 				branch = new_parent;				/* push parent to branch */
 
 				pr_info("%s: parent "NODE_FMT" becomes right-heavy, continue\n",
