@@ -415,7 +415,6 @@ int prealloc_insert(struct sptree_root *root, unsigned long addr)
 		return -ENOMEM;
 
 	node->start = addr;
-	node->length = PAGE_SIZE;
 	node->parent = parent;		/* only link one way */
 	node->new_branch = 1;
 

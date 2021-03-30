@@ -11,10 +11,8 @@
 
 #include "tree.h"
 
-int standard_init(struct sptree_root *root, unsigned long start, size_t length)
+int standard_init(struct sptree_root *root)
 {
-	root->start = start;
-	root->length = length;
 	root->root = NULL;
 
 	pr_info("%s: created empty root\n", __func__);
@@ -98,7 +96,7 @@ static struct sptree_node *search(struct sptree_root *root, unsigned long addr)
 	pr_info("%s: looking for %lx\n", __func__, addr);
 
 	for (crnt = root->root; crnt != NULL; ) {
-		if (addr >= crnt->start && addr < crnt->start + crnt->length)
+		if (addr == crnt->start)
 			break;
 		else if (addr < crnt->start)
 			crnt = crnt->left;
@@ -1214,7 +1212,6 @@ int standard_insert(struct sptree_root *root, unsigned long addr)
 		return -ENOMEM;
 
 	node->start = addr;
-	node->length = PAGE_SIZE;
 
 	// reverse, then direct link
 	WRITE_ONCE(node->parent, parent);

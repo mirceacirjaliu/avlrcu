@@ -7,7 +7,6 @@
 
 struct sptree_node {
 	unsigned long start;
-	size_t length;
 
 	struct sptree_node *parent;
 	struct sptree_node *left;
@@ -30,8 +29,6 @@ struct sptree_node {
 };
 
 struct sptree_root {
-	unsigned long start;	// overall information about range
-	size_t length;
 
 	// TODO: sptree_ops pointer goes here
 
@@ -108,8 +105,8 @@ static inline char node_balancing(const struct sptree_node *node)
 	}
 }
 
-#define NODE_FMT "(%lx-%lx,%d)"
-#define NODE_ARG(__node) (__node)->start, (__node)->start + (__node)->length, (__node)->balancing
+#define NODE_FMT "(%lx, %d)"
+#define NODE_ARG(__node) (__node)->start, (__node)->balancing
 
 
 
@@ -148,15 +145,13 @@ extern void sptree_iter_next_po(struct sptree_iterator *iter);
 	for (sptree_iter_first_po(_root, _iter); (_iter)->node != NULL; sptree_iter_next_po(_iter))
 
 
-extern int standard_init(struct sptree_root *root, unsigned long start, size_t length);
+extern int standard_init(struct sptree_root *root);
 extern void sptree_free(struct sptree_root *root);
 
 // helper for operations on an address
 static inline bool address_valid(struct sptree_root *root, unsigned long addr)
 {
 	if (addr & ~PAGE_MASK)
-		return false;
-	if (addr < root->start || addr > root->start + root->length - PAGE_SIZE)
 		return false;
 
 	return true;

@@ -106,12 +106,6 @@ static ssize_t insert_map(struct file *file, const char __user *data, size_t cou
 		return -EINVAL;
 	}
 
-	// check if inside the sptree_range
-	if (value < sptree_range.start || value > sptree_range.start + sptree_range.length - PAGE_SIZE) {
-		pr_err("%s: outside sptree_range: %lx-%lx\n", __func__, sptree_range.start, sptree_range.start + sptree_range.length);
-		return -EINVAL;
-	}
-
 	//spin_lock(&lock);
 	result = prealloc_insert(&sptree_range, value);
 	//spin_unlock(&lock);
@@ -143,12 +137,6 @@ static ssize_t delete_map(struct file *file, const char __user *data, size_t cou
 		return -EINVAL;
 	}
 
-	// check if inside the sptree_range
-	if (value < sptree_range.start || value > sptree_range.start + sptree_range.length - PAGE_SIZE) {
-		pr_err("%s: outside sptree_range: %lx-%lx\n", __func__, sptree_range.start, sptree_range.start + sptree_range.length);
-		return -EINVAL;
-	}
-
 	//spin_lock(&lock);
 	result = sptree_delete(&sptree_range, value);
 	//spin_unlock(&lock);
@@ -165,14 +153,7 @@ static ssize_t delete_map(struct file *file, const char __user *data, size_t cou
 
 static ssize_t clear_map(struct file *file, const char __user *data, size_t count, loff_t *offs)
 {
-	int result;
-
 	sptree_free(&sptree_range);
-
-	// create the sptree_range: 4KB - 1MB
-	result = standard_init(&sptree_range, 4 * KB, 1 * MB - 4 * KB);
-	if (result)
-		pr_warn("%s: failed reinit!!\n", __func__);
 
 	*offs += count;
 	return count;
@@ -192,12 +173,6 @@ static ssize_t ror_map(struct file *file, const char __user *data, size_t count,
 	// check if alligned to page
 	if (value & ~PAGE_MASK) {
 		pr_err("%s: non-aligned value: %lx\n", __func__, value);
-		return -EINVAL;
-	}
-
-	// check if inside the sptree_range
-	if (value < sptree_range.start || value > sptree_range.start + sptree_range.length - PAGE_SIZE) {
-		pr_err("%s: outside sptree_range: %lx-%lx\n", __func__, sptree_range.start, sptree_range.start + sptree_range.length);
 		return -EINVAL;
 	}
 
@@ -232,12 +207,6 @@ static ssize_t rol_map(struct file *file, const char __user *data, size_t count,
 		return -EINVAL;
 	}
 
-	// check if inside the sptree_range
-	if (value < sptree_range.start || value > sptree_range.start + sptree_range.length - PAGE_SIZE) {
-		pr_err("%s: outside sptree_range: %lx-%lx\n", __func__, sptree_range.start, sptree_range.start + sptree_range.length);
-		return -EINVAL;
-	}
-
 	//spin_lock(&lock);
 	result = sptree_rol(&sptree_range, value);
 	//spin_unlock(&lock);
@@ -269,12 +238,6 @@ static ssize_t rrl_map(struct file *file, const char __user *data, size_t count,
 		return -EINVAL;
 	}
 
-	// check if inside the sptree_range
-	if (value < sptree_range.start || value > sptree_range.start + sptree_range.length - PAGE_SIZE) {
-		pr_err("%s: outside sptree_range: %lx-%lx\n", __func__, sptree_range.start, sptree_range.start + sptree_range.length);
-		return -EINVAL;
-	}
-
 	//spin_lock(&lock);
 	result = sptree_rrl(&sptree_range, value);
 	//spin_unlock(&lock);
@@ -303,12 +266,6 @@ static ssize_t rlr_map(struct file *file, const char __user *data, size_t count,
 	// check if alligned to page
 	if (value & ~PAGE_MASK) {
 		pr_err("%s: non-aligned value: %lx\n", __func__, value);
-		return -EINVAL;
-	}
-
-	// check if inside the sptree_range
-	if (value < sptree_range.start || value > sptree_range.start + sptree_range.length - PAGE_SIZE) {
-		pr_err("%s: outside sptree_range: %lx-%lx\n", __func__, sptree_range.start, sptree_range.start + sptree_range.length);
 		return -EINVAL;
 	}
 
@@ -376,9 +333,8 @@ static int dump_gv_show(struct seq_file *s, void *v)
 	left = node->left;
 	right = node->right;
 
-	seq_printf(s, "\tn%lx [label=\"%lx - %lx\\n%d\", style=filled, fillcolor=%s]\n",
-		(unsigned long)node, node->start, node->start + node->length,
-		node->balancing, "green");
+	seq_printf(s, "\tn%lx [label=\"%lx\\n%d\", style=filled, fillcolor=%s]\n",
+		(unsigned long)node, node->start, node->balancing, "green");
 
 	if (left)
 		seq_printf(s, "\tn%lx -> n%lx [tailport=w]\n",
@@ -626,7 +582,7 @@ static int __init sptree_test_init(void)
 	int result;
 
 	// create the sptree_range: 4KB - 1MB
-	result = standard_init(&sptree_range, 4 * KB, 1 * MB - 4 * KB);
+	result = standard_init(&sptree_range);
 	if (result)
 		return result;
 
