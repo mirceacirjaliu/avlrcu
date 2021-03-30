@@ -109,13 +109,15 @@ static inline char node_balancing(const struct sptree_node *node)
 #define NODE_ARG(__node) (__node)->start, (__node)->balancing
 
 
-
-// TODO: starea ar trebui sa zica din ce directie a venit
-// TODO: cand intram intr-un nod (de sus), mai intai cautam in stanga
-// TODO: cand ne-am intors din stanga, lucram pe nod
-// TODO: dupa nod, cautam in dreapta
-// TODO: dupa dreapta, ne intoarcem la parinte
-// TODO: (intoarcerea la parinte se poate face pe ramura stanga/dreapta)
+/*
+ * The state tells the direction the iteration came from.
+ * We enter a node from parent (up).
+ * After entering a node, we first look left.
+ * After handling left, we handle the node (in-order).
+ * After handling the node, we look right.
+ * After handling right, we return to parent.
+ * (Returning to parent can be done from the left/right child.)
+ */
 enum sptree_iter_state {
 	ITER_UP,
 	ITER_LEFT,

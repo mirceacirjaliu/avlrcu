@@ -329,10 +329,10 @@ static void prealloc_connect(struct sptree_root *root, struct sptree_node *branc
 		switch (io.state)
 		{
 		case ITER_UP:
-			next = io.node->left;
+			next = io.node->left;			// move to left node
 			if (next) {
 				if (is_new_branch(next)) {
-					io.node = next;		// move to left node
+					io.node = next;
 					break;			// switch
 				}
 				else {
@@ -343,10 +343,10 @@ static void prealloc_connect(struct sptree_root *root, struct sptree_node *branc
 			}
 
 		case ITER_LEFT:
-			next = io.node->right;
+			next = io.node->right;			// move to right node
 			if (next) {
 				if (is_new_branch(next)) {
-					io.node = next;		// move to right node
+					io.node = next;
 					io.state = ITER_UP;
 					break;			// switch
 				}
@@ -358,13 +358,13 @@ static void prealloc_connect(struct sptree_root *root, struct sptree_node *branc
 			}
 
 		case ITER_RIGHT:
-			next = strip_flags(io.node->parent);
+			next = strip_flags(io.node->parent);	// move to parent
 			if (next && is_new_branch(next)) {
 				if (is_left_child(io.node->parent))
 					io.state = ITER_LEFT;
 			}
 			else {
-				next = NULL;			// out of branch thru parent
+				next = NULL;			// out of new branch
 				io.state = ITER_DONE;		// done!
 			}
 
@@ -377,10 +377,10 @@ static void prealloc_connect(struct sptree_root *root, struct sptree_node *branc
 			break;					// switch
 
 		default:
-			pr_warn("%s: unhandled iterator state\n", __func__);
+			pr_err("%s: unhandled iterator state\n", __func__);
+			BUG();
 			io.node = NULL;				// cancels iteration
 			io.state = ITER_DONE;
-			// TODO: BUG() or smth
 			break;
 		}
 	}
