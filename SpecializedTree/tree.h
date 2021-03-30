@@ -33,8 +33,12 @@ struct sptree_root {
 	unsigned long start;	// overall information about range
 	size_t length;
 
+	// TODO: sptree_ops pointer goes here
+
 	struct sptree_node *root;
 };
+
+extern void validate_avl_balancing(struct sptree_root *root);
 
 // flags set on parent pointer to fast determine on which side of the parent we are
 #define RIGHT_CHILD 0
