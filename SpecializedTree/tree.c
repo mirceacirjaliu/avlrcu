@@ -89,7 +89,7 @@ void validate_avl_balancing(struct sptree_root *root)
 
 
 // search for the node containing this address
-static struct sptree_node *search(struct sptree_root *root, unsigned long addr)
+struct sptree_node *search(struct sptree_root *root, unsigned long addr)
 {
 	struct sptree_node *crnt;
 
@@ -1428,6 +1428,8 @@ static struct sptree_node *unwind_avl(struct sptree_root *root, struct sptree_no
  * above is unaffected.
  *
  * TODO: Returns 0 for success or -ENOMEM if rotations fail.
+ * TODO: If the subtree whose root is being deleted changes height,
+ * this change must propagate above the previous parent !!!!
  */
 static void fix_avl(struct sptree_root *root, struct sptree_node *target, struct sptree_node *stop)
 {
@@ -1480,7 +1482,7 @@ static void delete_leaf(struct sptree_root *root, struct sptree_node *target)
 }
 
 /**
- * sptree_delete() - deletes a node from an address interval
+ * standard_delete() - deletes a node from the tree
  * @root:	The root of the tree
  * @addr:	Address of the node
  *
@@ -1491,7 +1493,7 @@ static void delete_leaf(struct sptree_root *root, struct sptree_node *target)
  *
  * Returns 0 on success or -E... on failure.
  */
-int sptree_delete(struct sptree_root *root, unsigned long addr)
+int standard_delete(struct sptree_root *root, unsigned long addr)
 {
 	struct sptree_node *target;
 	struct sptree_node *parent_before, *parent_after;

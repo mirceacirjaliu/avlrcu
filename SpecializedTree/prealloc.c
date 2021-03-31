@@ -191,7 +191,7 @@ static struct sptree_node *rotate_right_left_prealloc(struct sptree_node *root)
 	return new_root;
 }
 
-static struct sptree_node *precomputed_retrace(struct sptree_root *root, struct sptree_node *node)
+static struct sptree_node *prealloc_retrace(struct sptree_root *root, struct sptree_node *node, struct sptree_node **old)
 {
 	struct sptree_node *parent;
 	struct sptree_node *branch = node;
@@ -210,8 +210,10 @@ static struct sptree_node *precomputed_retrace(struct sptree_root *root, struct 
 			goto error;
 
 		memcpy(new_parent, parent, sizeof(*new_parent));
-		new_parent->old = parent;					/* will replace this node */
 		new_parent->new_branch = 1;
+
+		parent->old = *old;						/* this node will be replaced */
+		*old = parent;							/* add to chain of old nodes */
 
 		if (is_left_child(node->parent)) {
 			pr_info("%s: node "NODE_FMT" is left child of "NODE_FMT"\n", __func__,
@@ -306,9 +308,19 @@ error:
 	// TODO: use a general-purpose function for that (that receives callbacks)
 	// TODO: the delete() code will create a tree segment that needs in-order traversal
 
-	return NULL;
+	return ERR_PTR(-ENOMEM);
 };
 
+/**
+ * prealloc_connect() - insert the new branch in a tree
+ * @root:	The root of the tree
+ * @branch:	The root of the new branch/subtree
+ *
+ * Used on insertion/deletion. The new branch can be:
+ * - a single node or a branch for insertion
+ * - NULL when deleting the only node in a tree (empty branch)
+ * - a subtree for deletion
+ */
 static void prealloc_connect(struct sptree_root *root, struct sptree_node *branch)
 {
 	struct sptree_node **pbranch;
@@ -316,7 +328,7 @@ static void prealloc_connect(struct sptree_root *root, struct sptree_node *branc
 	struct sptree_node *next;
 
 	// parent may contain L/R flags or NULL
-	pbranch = get_pnode(root, branch->parent);
+	pbranch = get_pnode(root, branch == NULL ? NULL : branch->parent);
 
 	// first link root (iterators entering here must find a way out)
 	WRITE_ONCE(*pbranch, branch);
@@ -369,8 +381,8 @@ static void prealloc_connect(struct sptree_root *root, struct sptree_node *branc
 			}
 
 			// delete old node before exiting this one
-			kfree_rcu(io.node->old, rcu);
-			io.node->old = NULL;
+			//kfree_rcu(io.node->old, rcu);
+			//io.node->old = NULL;
 			io.node->new_branch = 0;
 
 			io.node = next;				// finally move to parent
@@ -386,11 +398,23 @@ static void prealloc_connect(struct sptree_root *root, struct sptree_node *branc
 	}
 }
 
+static void remove_old_nodes(struct sptree_node *old)
+{
+	struct sptree_node *temp;
+
+	while (old) {
+		temp = old->old;
+		kfree_rcu(old, rcu);
+		old = temp;
+	}
+}
+
 int prealloc_insert(struct sptree_root *root, unsigned long addr)
 {
 	struct sptree_node *crnt, *parent;
 	struct sptree_node *node;
 	struct sptree_node *prealloc;
+	struct sptree_node *old = NULL;
 
 	if (!address_valid(root, addr))
 		return -EINVAL;
@@ -419,12 +443,66 @@ int prealloc_insert(struct sptree_root *root, unsigned long addr)
 	node->new_branch = 1;
 
 	/* retrace generates the preallocated branch */
-	prealloc = precomputed_retrace(root, node);
-	if (!prealloc)
+	prealloc = prealloc_retrace(root, node, &old);
+	if (IS_ERR_OR_NULL(prealloc))
 		return -ENOMEM;
 
-	// connect the preallocated branch (this will remove the replaced nodes)
+	// connect the preallocated branch
 	prealloc_connect(root, prealloc);
+
+	// this will remove the replaced nodes
+	remove_old_nodes(old);
+
+	// TODO: remove once code stable
+	validate_avl_balancing(root);
+
+	return 0;
+}
+
+/* delete & retrace in a single function */
+static struct sptree_node *prealloc_delete_retrace(struct sptree_root *root, struct sptree_node *node, struct sptree_node **old)
+{
+
+	return NULL;
+}
+
+/*
+ * TODO: If the subtree whose root is being deleted changes height,
+ * this change must propagate above the previous parent - retrace !!!!
+ *
+ * TODO: When deleting a leaf node, that node itself (the old node) has to be deleted (RCU delete).
+ * When deleting a subtree root, it has to bubble down the tree, delete the node on the new path,
+ * (the node on the old path also has to be deleted), then retrace can create new nodes on the
+ * new path.
+ *
+ * TODO: Connecting the new branch in the tree deletes nodes not necessarily in the same order
+ * as connections are made. Temporary holes may appear ?!
+ * TODO: Old nodes should be chained and deleted (RCU) after insertion is done. At this point
+ * no other walker can enter an old node, but old nodes can still be used by walkers.
+ */
+int prealloc_delete(struct sptree_root *root, unsigned long addr)
+{
+	struct sptree_node *target;
+	struct sptree_node *prealloc;
+	struct sptree_node *old = NULL;
+
+	if (!address_valid(root, addr))
+		return -EINVAL;
+
+	target = search(root, addr);
+	if (!target)
+		return -ENXIO;
+
+	/* may return NULL as a valid value */
+	prealloc = prealloc_delete_retrace(root, target, &old);
+	if (IS_ERR(prealloc))
+		return PTR_ERR(prealloc);
+
+	// connect the preallocated branch
+	prealloc_connect(root, prealloc);
+
+	// this will remove the replaced nodes
+	remove_old_nodes(old);
 
 	// TODO: remove once code stable
 	validate_avl_balancing(root);

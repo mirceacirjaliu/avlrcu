@@ -80,7 +80,7 @@ static int validator_func(void *arg)
 
 		//validate_nodes(&sptree_range);
 
-		msleep_interruptible(1000);
+		msleep_interruptible(10);
 
 	} while (!kthread_should_stop());
 
@@ -138,7 +138,7 @@ static ssize_t delete_map(struct file *file, const char __user *data, size_t cou
 	}
 
 	//spin_lock(&lock);
-	result = sptree_delete(&sptree_range, value);
+	result = prealloc_delete(&sptree_range, value);
 	//spin_unlock(&lock);
 
 	if (result == 0)

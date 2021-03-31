@@ -16,7 +16,7 @@ struct sptree_node {
 		struct rcu_head rcu;
 
 		struct {
-			/* current node is part of the preallocated branch and will replace an old node */
+			/* chain of old nodes to be deleted */
 			struct sptree_node *old;
 
 			// TODO: in case of all levels balanced, a lot of reverse double rotations will be needed
@@ -159,10 +159,14 @@ static inline bool address_valid(struct sptree_root *root, unsigned long addr)
 	return true;
 }
 
-// these 2 must be protected by a lock
+extern struct sptree_node *search(struct sptree_root *root, unsigned long addr);
+
+// these must be protected by a lock
 extern int standard_insert(struct sptree_root *root, unsigned long addr);
+extern int standard_delete(struct sptree_root *root, unsigned long addr);
+
 extern int prealloc_insert(struct sptree_root *root, unsigned long addr);
-extern int sptree_delete(struct sptree_root *root, unsigned long addr);
+extern int prealloc_delete(struct sptree_root *root, unsigned long addr);
 
 // same for these
 extern int sptree_ror(struct sptree_root *root, unsigned long addr);
