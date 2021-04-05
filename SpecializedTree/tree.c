@@ -68,11 +68,11 @@ static int validate_subtree_balancing(struct sptree_node *node)
 
 	// check for balance outside [-1..1]
 	if (diff < -1 || diff > 1)
-		pr_warn("%s: excessive balancing on "NODE_FMT", left depth %d, right depth %d\n",
+		pr_warn("%s: excessive balance on "NODE_FMT", left depth %d, right depth %d\n",
 			__func__, NODE_ARG(node), left_depth, right_depth);
 
 	// check if the algorithm computed the balance right
-	if (diff != node->balancing)
+	if (diff != node->balance)
 		pr_err("%s: wrong balance factor on "NODE_FMT", left depth %d, right depth %d\n",
 			__func__, NODE_ARG(node), left_depth, right_depth);
 
@@ -501,14 +501,14 @@ static int ror_height_diff(struct sptree_node *root)
 	struct sptree_node *pivot = root->left;		// Y
 	int diff = 0;
 
-	if (pivot->balancing >= 0) {
-		if (root->balancing >= 0)
+	if (pivot->balance >= 0) {
+		if (root->balance >= 0)
 			diff = 1;
 	}
 	else {
-		if (root->balancing >= 0)
+		if (root->balance >= 0)
 			diff = 1;
-		else if (root->balancing < -1)
+		else if (root->balance < -1)
 			diff = -1;
 	}
 
@@ -539,14 +539,14 @@ static int rol_height_diff(struct sptree_node *root)
 	struct sptree_node *pivot = root->right;	// Y
 	int diff = 0;
 
-	if (pivot->balancing <= 0) {
-		if (root->balancing <= 0)
+	if (pivot->balance <= 0) {
+		if (root->balance <= 0)
 			diff = 1;
 	}
 	else {
-		if (root->balancing <= 0)
+		if (root->balance <= 0)
 			diff = 1;
-		else if (root->balancing > 1)
+		else if (root->balance > 1)
 			diff = -1;
 	}
 
@@ -561,7 +561,7 @@ static int rol_height_diff(struct sptree_node *root)
 }
 
 /**
- * propagate_height_diff() - go up the branch & change balancing
+ * propagate_height_diff() - go up the branch & change balance
  * @subtree:	The subtree whose height has changed following a rotation/deletion.
  *
  * Under certain operations, the height of the subtree changes, and
@@ -579,9 +579,9 @@ static void propagate_height_diff(struct sptree_node *subtree, int diff)
 		parent = strip_flags(parent);
 
 		if (left)
-			parent->balancing -= diff;
+			parent->balance -= diff;
 		else
-			parent->balancing += diff;
+			parent->balance += diff;
 
 		pr_info("%s: updated balance factor for "NODE_FMT"\n",
 			__func__, NODE_ARG(parent));
@@ -609,19 +609,19 @@ static struct sptree_node *rotate_right_generic(struct sptree_node *root, struct
 	new_pivot = new_root->right;
 
 	// fix balance factors
-	if (pivot->balancing >= 0) {
-		new_pivot->balancing = root->balancing + 1;
-		if (root->balancing <= -1)
-			new_root->balancing = pivot->balancing + 1;
+	if (pivot->balance >= 0) {
+		new_pivot->balance = root->balance + 1;
+		if (root->balance <= -1)
+			new_root->balance = pivot->balance + 1;
 		else
-			new_root->balancing = root->balancing + pivot->balancing + 2;
+			new_root->balance = root->balance + pivot->balance + 2;
 	}
 	else {
-		new_pivot->balancing = root->balancing - pivot->balancing + 1;
-		if (root->balancing <= pivot->balancing - 1)
-			new_root->balancing = pivot->balancing + 1;
+		new_pivot->balance = root->balance - pivot->balance + 1;
+		if (root->balance <= pivot->balance - 1)
+			new_root->balance = pivot->balance + 1;
 		else
-			new_root->balancing = root->balancing + 2;
+			new_root->balance = root->balance + 2;
 	}
 
 	// propagate change in height up the tree
@@ -653,12 +653,12 @@ int sptree_ror(struct sptree_root *root, unsigned long addr)
 		return -EINVAL;
 	}
 
-	// validate balancing
-	//if (target->balancing > 0) {
+	// validate balance
+	//if (target->balance > 0) {
 	//	pr_err("%s: root "NODE_FMT" already right-heavy, can't do\n", __func__, NODE_ARG(target));
 	//	return -EINVAL;
 	//}
-	//if (pivot->balancing > 0) {
+	//if (pivot->balance > 0) {
 	//	pr_err("%s: pivot "NODE_FMT" already right-heavy, can't do\n", __func__, NODE_ARG(target));
 	//	return -EINVAL;
 	//}
@@ -697,19 +697,19 @@ static struct sptree_node *rotate_left_generic(struct sptree_node *root, struct 
 	new_pivot = new_root->left;
 
 	// fix balance factors
-	if (pivot->balancing <= 0) {
-		new_pivot->balancing = root->balancing - 1;
-		if (root->balancing >= 1)
-			new_root->balancing = pivot->balancing - 1;
+	if (pivot->balance <= 0) {
+		new_pivot->balance = root->balance - 1;
+		if (root->balance >= 1)
+			new_root->balance = pivot->balance - 1;
 		else
-			new_root->balancing = root->balancing + pivot->balancing - 2;
+			new_root->balance = root->balance + pivot->balance - 2;
 	}
 	else {
-		new_pivot->balancing = root->balancing - pivot->balancing - 1;
-		if (root->balancing >= pivot->balancing + 1)
-			new_root->balancing = pivot->balancing - 1;
+		new_pivot->balance = root->balance - pivot->balance - 1;
+		if (root->balance >= pivot->balance + 1)
+			new_root->balance = pivot->balance - 1;
 		else
-			new_root->balancing = root->balancing - 2;
+			new_root->balance = root->balance - 2;
 	}
 
 	// propagate change in height up the tree
@@ -741,12 +741,12 @@ int sptree_rol(struct sptree_root *root, unsigned long addr)
 		return -EINVAL;
 	}
 
-	// validate balancing
-	//if (target->balancing < 0) {
+	// validate balance
+	//if (target->balance < 0) {
 	//	pr_err("%s: root "NODE_FMT" already left-heavy, can't do\n", __func__, NODE_ARG(target));
 	//	return -EINVAL;
 	//}
-	//if (pivot->balancing < 0) {
+	//if (pivot->balance < 0) {
 	//	pr_err("%s: pivot "NODE_FMT" already left-heavy, can't do\n", __func__, NODE_ARG(target));
 	//	return -EINVAL;
 	//}
@@ -916,13 +916,13 @@ static struct sptree_node *rotate_right_retrace(struct sptree_node *root, struct
 	new_pivot = new_root->right;
 
 	// fix balance factors
-	if (pivot->balancing == 0) {
-		new_root->balancing = 1;
-		new_pivot->balancing = -1;
+	if (pivot->balance == 0) {
+		new_root->balance = 1;
+		new_pivot->balance = -1;
 	}
 	else {
-		new_pivot->balancing = 0;
-		new_root->balancing = 0;
+		new_pivot->balance = 0;
+		new_root->balance = 0;
 	}
 
 	pr_info("%s: rotated right, new root is "NODE_FMT"\n",
@@ -959,13 +959,13 @@ static struct sptree_node *rotate_left_retrace(struct sptree_node *root, struct 
 	new_pivot = new_root->left;
 
 	// fix balance factors
-	if (pivot->balancing == 0) {
-		new_root->balancing = 1;
-		new_pivot->balancing = -1;
+	if (pivot->balance == 0) {
+		new_root->balance = 1;
+		new_pivot->balance = -1;
 	}
 	else {
-		new_pivot->balancing = 0;
-		new_root->balancing = 0;
+		new_pivot->balance = 0;
+		new_root->balance = 0;
 	}
 
 	pr_info("%s: rotated left, new root is "NODE_FMT"\n",
@@ -1005,19 +1005,19 @@ static struct sptree_node *rotate_right_left_retrace(struct sptree_node *root, s
 	new_right = new_root->right;
 
 	// fix balance factors
-	if (left->balancing > 0) {
-		new_left->balancing = -1;
-		new_right->balancing = 0;
+	if (left->balance > 0) {
+		new_left->balance = -1;
+		new_right->balance = 0;
 	}
-	else if (left->balancing == 0) {
-		new_left->balancing = 0;
-		new_right->balancing = 0;
+	else if (left->balance == 0) {
+		new_left->balance = 0;
+		new_right->balance = 0;
 	}
 	else {
-		new_left->balancing = 0;
-		new_right->balancing = 1;
+		new_left->balance = 0;
+		new_right->balance = 1;
 	}
-	new_root->balancing = 0;
+	new_root->balance = 0;
 
 	pr_info("%s: rotated right-left, new root is "NODE_FMT"\n",
 		__func__, NODE_ARG(new_root));
@@ -1056,20 +1056,20 @@ static struct sptree_node *rotate_left_right_retrace(struct sptree_node *root, s
 	new_right = new_root->right;
 
 	// fix balance factors
-	if (right->balancing > 0) {
-		new_left->balancing = -1;
-		new_right->balancing = 0;
+	if (right->balance > 0) {
+		new_left->balance = -1;
+		new_right->balance = 0;
 	}
-	else  if (right->balancing == 0) {
-		new_left->balancing = 0;
-		new_right->balancing = 0;
+	else  if (right->balance == 0) {
+		new_left->balance = 0;
+		new_right->balance = 0;
 	}
 	else {
-		new_left->balancing = 0;
-		new_right->balancing = 1;
+		new_left->balance = 0;
+		new_right->balance = 1;
 	}
 
-	new_root->balancing = 0;
+	new_root->balance = 0;
 
 	pr_info("%s: rotated left-right, new root is "NODE_FMT"\n",
 		__func__, NODE_ARG(new_root));
@@ -1109,9 +1109,9 @@ static int standard_retrace(struct sptree_root *root, struct sptree_node *node)
 				NODE_ARG(node), NODE_ARG(parent));
 
 			// parent is left-heavy
-			if (parent->balancing < 0) {
+			if (parent->balance < 0) {
 				// node is right-heavy
-				if (node->balancing > 0)
+				if (node->balance > 0)
 					parent = rotate_left_right_retrace(parent, pparent);
 				else
 					parent = rotate_right_retrace(parent, pparent);
@@ -1121,15 +1121,15 @@ static int standard_retrace(struct sptree_root *root, struct sptree_node *node)
 				break;
 			}
 			// parent is right-heavy
-			else if (parent->balancing > 0) {
-				parent->balancing = 0;
+			else if (parent->balance > 0) {
+				parent->balance = 0;
 				pr_info("%s: parent becomes balanced: "NODE_FMT", stop\n",
 					__func__, NODE_ARG(parent));
 				break;
 			}
 			// parent is balanced
 			else {
-				parent->balancing = -1;
+				parent->balance = -1;
 				pr_info("%s: parent becomes unbalanced: "NODE_FMT", continue\n",
 					__func__, NODE_ARG(parent));
 			}
@@ -1142,9 +1142,9 @@ static int standard_retrace(struct sptree_root *root, struct sptree_node *node)
 				NODE_ARG(node), NODE_ARG(parent));
 
 			// parent is right heavy
-			if (parent->balancing > 0) {
+			if (parent->balance > 0) {
 				// node is left-heavy
-				if (node->balancing < 0)
+				if (node->balance < 0)
 					parent = rotate_right_left_retrace(parent, pparent);
 				else
 					parent = rotate_left_retrace(parent, pparent);
@@ -1154,15 +1154,15 @@ static int standard_retrace(struct sptree_root *root, struct sptree_node *node)
 				break;
 			}
 			// parent is left-heavy
-			else if (parent->balancing < 0) {
-				parent->balancing = 0;
+			else if (parent->balance < 0) {
+				parent->balance = 0;
 				pr_info("%s: parent becomes balanced: "NODE_FMT", stop\n",
 					__func__, NODE_ARG(parent));
 				break;
 			}
 			// parent is balanced
 			else {
-				parent->balancing = +1;
+				parent->balance = +1;
 				pr_info("%s: parent becomes unbalanced: "NODE_FMT", continue\n",
 					__func__, NODE_ARG(parent));
 			}
@@ -1239,7 +1239,7 @@ static struct sptree_node *unwind_left(struct sptree_root *root, struct sptree_n
 	// parent may contain L/R flags or NULL
 	ptarget = get_pnode(root, target->parent);
 
-	if (pivot->balancing == -1)
+	if (pivot->balance == -1)
 		subtree_root = rotate_right_left_generic(target, ptarget);
 	else
 		subtree_root = rotate_left_generic(target, ptarget);
@@ -1262,7 +1262,7 @@ static struct sptree_node *unwind_right(struct sptree_root *root, struct sptree_
 	// parent may contain L/R flags or NULL
 	ptarget = get_pnode(root, target->parent);
 
-	if (pivot->balancing == 1)
+	if (pivot->balance == 1)
 		subtree_root = rotate_left_right_generic(target, ptarget);
 	else
 		subtree_root = rotate_right_generic(target, ptarget);
@@ -1336,33 +1336,33 @@ static struct sptree_node *unwind_double(struct sptree_root *root, struct sptree
 	// a rotation will give the new pivot the nearest subtree of the old pivot
 
 	// reverse RRL
-	if (left->balancing == -1)
+	if (left->balance == -1)
 		return reverse_rrl(root, target);
 
 	// reverse RLR
-	if (right->balancing == 1)
+	if (right->balance == 1)
 		return reverse_rlr(root, target);
 
 	// don't care: so reverse RRL
-	if (right->balancing == 0 && left->balancing == 0)
+	if (right->balance == 0 && left->balance == 0)
 		return reverse_rrl(root, target);
 
 	// both poorly balanced: rebalance one of them
-	if (right->balancing == -1 && left->balancing == 1) {
+	if (right->balance == -1 && left->balance == 1) {
 		// rebalance the right subtree, then apply case 2
 		rotate_right_generic(right, &target->right);
 		return reverse_rlr(root, target);
 	}
 
 	// rebalance left
-	if (right->balancing == 0 && left->balancing == 1) {
+	if (right->balance == 0 && left->balance == 1) {
 		// rebalance the left subtree, then apply case 1
 		rotate_left_generic(left, &target->left);
 		return reverse_rrl(root, target);
 	}
 
 	// rebalance right
-	if (right->balancing == -1 && left->balancing == 0) {
+	if (right->balance == -1 && left->balance == 0) {
 		// rebalance the right subtree, then apply case 2
 		rotate_right_generic(right, &target->right);
 		return reverse_rlr(root, target);
@@ -1389,10 +1389,10 @@ static struct sptree_node *unwind_avl(struct sptree_root *root, struct sptree_no
 
 	do {
 		// each unwinding step must start with a normal balance
-		BUG_ON(target->balancing < -1 || target->balancing > 1);
+		BUG_ON(target->balance < -1 || target->balance > 1);
 
 		// each of these functions will return NULL on error
-		switch (target->balancing) {
+		switch (target->balance) {
 		case -1:
 			target = unwind_right(root, target);
 			break;
@@ -1441,13 +1441,13 @@ static void fix_avl(struct sptree_root *root, struct sptree_node *target, struct
 		pr_info("%s: currently on target "NODE_FMT"\n",
 			__func__, NODE_ARG(target));
 
-		if (target->balancing >= -1 && target->balancing <= 1)
+		if (target->balance >= -1 && target->balance <= 1)
 			continue;
 
 		// parent may contain L/R flags or NULL
 		ptarget = get_pnode(root, target->parent);
 
-		if (target->balancing == -2)
+		if (target->balance == -2)
 			target = rotate_left_right_generic(target, ptarget);
 		else
 			target = rotate_right_left_generic(target, ptarget);

@@ -22,7 +22,7 @@ struct sptree_node {
 			// TODO: in case of all levels balanced, a lot of reverse double rotations will be needed
 			// TODO: this will propagate a lot of unbalancing along the branch & this number may increase/decrease
 			// TODO: must find a way not to overflow this variable
-			int balancing : 15;
+			int balance : 15;
 			int new_branch : 1;
 		};
 	};
@@ -73,6 +73,11 @@ static inline struct sptree_node *strip_flags(struct sptree_node *parent)
 	return (struct sptree_node *)((unsigned long)parent & ~PARENT_FLAGS);
 }
 
+static inline struct sptree_node *get_parent(struct sptree_node *node)
+{
+	return strip_flags(node->parent);
+}
+
 /* Returns the address of the pointer pointing to current node based on node->parent. */
 static inline struct sptree_node **get_pnode(struct sptree_root *root, struct sptree_node *parent)
 {
@@ -92,7 +97,7 @@ static inline bool is_new_branch(struct sptree_node *node)
 /* For dumping purposes. */
 static inline char node_balancing(const struct sptree_node *node)
 {
-	switch (node->balancing)
+	switch (node->balance)
 	{
 	case -1:
 		return 'L';
@@ -106,7 +111,7 @@ static inline char node_balancing(const struct sptree_node *node)
 }
 
 #define NODE_FMT "(%lx, %d)"
-#define NODE_ARG(__node) (__node)->start, (__node)->balancing
+#define NODE_ARG(__node) (__node)->start, (__node)->balance
 
 
 /*
@@ -160,6 +165,8 @@ static inline bool address_valid(struct sptree_root *root, unsigned long addr)
 }
 
 extern struct sptree_node *search(struct sptree_root *root, unsigned long addr);
+//extern int rol_height_diff(struct sptree_node *root);
+//extern int ror_height_diff(struct sptree_node *root);
 
 // these must be protected by a lock
 extern int standard_insert(struct sptree_root *root, unsigned long addr);
@@ -167,6 +174,7 @@ extern int standard_delete(struct sptree_root *root, unsigned long addr);
 
 extern int prealloc_insert(struct sptree_root *root, unsigned long addr);
 extern int prealloc_delete(struct sptree_root *root, unsigned long addr);
+extern int prealloc_unwind(struct sptree_root *root, unsigned long addr);
 
 // same for these
 extern int sptree_ror(struct sptree_root *root, unsigned long addr);

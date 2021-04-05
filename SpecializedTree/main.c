@@ -107,7 +107,7 @@ static ssize_t insert_map(struct file *file, const char __user *data, size_t cou
 	}
 
 	//spin_lock(&lock);
-	result = prealloc_insert(&sptree_range, value);
+	result = standard_insert(&sptree_range, value);
 	//spin_unlock(&lock);
 
 	if (result == 0)
@@ -138,7 +138,100 @@ static ssize_t delete_map(struct file *file, const char __user *data, size_t cou
 	}
 
 	//spin_lock(&lock);
+	result = standard_delete(&sptree_range, value);
+	//spin_unlock(&lock);
+
+	if (result == 0)
+		pr_info("%s: success\n", __func__);
+	else
+		pr_err("%s: failed: %d\n", __func__, result);
+	pr_info("-\n");
+
+	*offs += count;
+	return count;
+}
+
+static ssize_t prealloc_insert_map(struct file *file, const char __user *data, size_t count, loff_t *offs)
+{
+	unsigned long value;
+	int result;
+
+	result = kstrtoul_from_user(data, count, 16, &value);
+	if (IS_ERR_VALUE((long)result))
+		return result;
+
+	pr_info("%s: at %lx\n", __func__, value);
+
+	// check if aligned to page
+	if (value & ~PAGE_MASK) {
+		pr_err("%s: non-aligned value: %lx\n", __func__, value);
+		return -EINVAL;
+	}
+
+	//spin_lock(&lock);
+	result = prealloc_insert(&sptree_range, value);
+	//spin_unlock(&lock);
+
+	if (result == 0)
+		pr_info("%s: success\n", __func__);
+	else
+		pr_err("%s: failed: %d\n", __func__, result);
+	pr_info("-\n");
+
+	*offs += count;
+	return count;
+}
+
+static ssize_t prealloc_delete_map(struct file *file, const char __user *data, size_t count, loff_t *offs)
+{
+	unsigned long value;
+	int result;
+
+	result = kstrtoul_from_user(data, count, 16, &value);
+	if (IS_ERR_VALUE((long)result))
+		return result;
+
+	pr_info("%s: at %lx\n", __func__, value);
+
+	// check if alligned to page
+	if (value & ~PAGE_MASK) {
+		pr_err("%s: non-aligned value: %lx\n", __func__, value);
+		return -EINVAL;
+	}
+
+	//spin_lock(&lock);
 	result = prealloc_delete(&sptree_range, value);
+	//spin_unlock(&lock);
+
+	if (result == 0)
+		pr_info("%s: success\n", __func__);
+	else
+		pr_err("%s: failed: %d\n", __func__, result);
+	pr_info("-\n");
+
+	*offs += count;
+	return count;
+}
+
+static ssize_t prealloc_unwind_map(struct file *file, const char __user *data, size_t count, loff_t *offs)
+{
+	unsigned long value;
+	int result;
+
+	result = kstrtoul_from_user(data, count, 16, &value);
+	if (IS_ERR_VALUE((long)result))
+		return result;
+
+	pr_info("%s: at %lx\n", __func__, value);
+
+	// check if alligned to page
+	if (value & ~PAGE_MASK) {
+		pr_err("%s: non-aligned value: %lx\n", __func__, value);
+		return -EINVAL;
+	}
+
+	//spin_lock(&lock);
+	result = prealloc_unwind(&sptree_range, value);
 	//spin_unlock(&lock);
 
 	if (result == 0)
@@ -334,7 +427,7 @@ static int dump_gv_show(struct seq_file *s, void *v)
 	right = node->right;
 
 	seq_printf(s, "\tn%lx [label=\"%lx\\n%d\", style=filled, fillcolor=%s]\n",
-		(unsigned long)node, node->start, node->balancing, "green");
+		(unsigned long)node, node->start, node->balance, "green");
 
 	if (left)
 		seq_printf(s, "\tn%lx -> n%lx [tailport=w]\n",
@@ -484,6 +577,21 @@ static struct file_operations delete_map_ops = {
 	.write = delete_map,
 };
 
+static struct file_operations prealloc_insert_map_ops = {
+	.owner = THIS_MODULE,
+	.write = prealloc_insert_map,
+};
+
+static struct file_operations prealloc_delete_map_ops = {
+	.owner = THIS_MODULE,
+	.write = prealloc_delete_map,
+};
+
+static struct file_operations prealloc_unwind_map_ops = {
+	.owner = THIS_MODULE,
+	.write = prealloc_unwind_map,
+};
+
 static struct file_operations clear_map_ops = {
 	.owner = THIS_MODULE,
 	.write = clear_map,
@@ -538,6 +646,18 @@ static int __init sptree_debugfs_init(void)
 		goto error;
 
 	result = debugfs_create_file("delete", S_IWUGO, debugfs_dir, NULL, &delete_map_ops);
+	if (IS_ERR(result))
+		goto error;
+
+	result = debugfs_create_file("prealloc_insert", S_IWUGO, debugfs_dir, NULL, &prealloc_insert_map_ops);
+	if (IS_ERR(result))
+		goto error;
+
+	result = debugfs_create_file("prealloc_delete", S_IWUGO, debugfs_dir, NULL, &prealloc_delete_map_ops);
+	if (IS_ERR(result))
+		goto error;
+
+	result = debugfs_create_file("prealloc_unwind", S_IWUGO, debugfs_dir, NULL, &prealloc_unwind_map_ops);
 	if (IS_ERR(result))
 		goto error;
 
