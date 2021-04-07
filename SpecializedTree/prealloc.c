@@ -79,7 +79,7 @@ static void _delete_prealloc(struct sptree_node *prealloc)
 
 
 /* return new root to be set as top of branch */
-static struct sptree_node *rotate_right_prealloc(struct sptree_node *root)
+static struct sptree_node *prealloc_retrace_ror(struct sptree_node *root)
 {
 	struct sptree_node *pivot = root->left;
 	struct sptree_node *new_root = pivot;
@@ -116,7 +116,7 @@ static struct sptree_node *rotate_right_prealloc(struct sptree_node *root)
 }
 
 /* return new root to be set as top of branch */
-static struct sptree_node *rotate_left_right_prealloc(struct sptree_node *root)
+static struct sptree_node *prealloc_retrace_rlr(struct sptree_node *root)
 {
 	// root = X
 	struct sptree_node *left = root->left;		// Z
@@ -168,7 +168,7 @@ static struct sptree_node *rotate_left_right_prealloc(struct sptree_node *root)
 }
 
 /* return new root to be set as top of branch */
-static struct sptree_node *rotate_left_prealloc(struct sptree_node *root)
+static struct sptree_node *prealloc_retrace_rol(struct sptree_node *root)
 {
 	struct sptree_node *pivot = root->right;
 	struct sptree_node *new_root = pivot;
@@ -206,7 +206,7 @@ static struct sptree_node *rotate_left_prealloc(struct sptree_node *root)
 }
 
 /* return new root to be set as top of branch */
-static struct sptree_node *rotate_right_left_prealloc(struct sptree_node *root)
+static struct sptree_node *prealloc_retrace_rrl(struct sptree_node *root)
 {
 	// root = X
 	struct sptree_node *right = root->right;	// Z
@@ -257,6 +257,7 @@ static struct sptree_node *rotate_right_left_prealloc(struct sptree_node *root)
 	return new_root;
 }
 
+/* retrace for insert */
 static struct sptree_node *prealloc_retrace(struct sptree_root *root, struct sptree_node *node, struct sptree_node **old)
 {
 	struct sptree_node *parent;
@@ -293,9 +294,9 @@ static struct sptree_node *prealloc_retrace(struct sptree_root *root, struct spt
 			if (parent->balance < 0) {
 				// node is right-heavy
 				if (branch->balance > 0)
-					branch = rotate_left_right_prealloc(new_parent);
+					branch = prealloc_retrace_rlr(new_parent);
 				else
-					branch = rotate_right_prealloc(new_parent);
+					branch = prealloc_retrace_ror(new_parent);
 				break;
 			}
 			// parent is right-heavy
@@ -329,9 +330,9 @@ static struct sptree_node *prealloc_retrace(struct sptree_root *root, struct spt
 			if (parent->balance > 0) {
 				// node is left-heavy
 				if (branch->balance < 0)
-					branch = rotate_right_left_prealloc(new_parent);
+					branch = prealloc_retrace_rrl(new_parent);
 				else
-					branch = rotate_left_prealloc(new_parent);
+					branch = prealloc_retrace_rol(new_parent);
 				break;
 			}
 			// parent is left-heavy
@@ -450,7 +451,7 @@ static void prealloc_connect(struct sptree_root *root, struct sptree_node *branc
 	}
 }
 
-static void remove_old_nodes(struct sptree_node *old)
+static void prealloc_remove_old(struct sptree_node *old)
 {
 	struct sptree_node *temp;
 
@@ -461,6 +462,7 @@ static void remove_old_nodes(struct sptree_node *old)
 	}
 }
 
+/* entry point */
 int prealloc_insert(struct sptree_root *root, unsigned long addr)
 {
 	struct sptree_node *crnt, *parent;
@@ -503,7 +505,7 @@ int prealloc_insert(struct sptree_root *root, unsigned long addr)
 	prealloc_connect(root, prealloc);
 
 	// this will remove the replaced nodes
-	remove_old_nodes(old);
+	prealloc_remove_old(old);
 
 	// TODO: remove once code stable
 	validate_avl_balancing(root);
@@ -1103,7 +1105,7 @@ int prealloc_unwind(struct sptree_root *root, unsigned long addr)
 	prealloc_connect(root, prealloc);
 
 	// this will remove the replaced nodes
-	remove_old_nodes(old);
+	prealloc_remove_old(old);
 
 	// TODO: remove once code stable
 	validate_avl_balancing(root);
@@ -1306,7 +1308,7 @@ int prealloc_delete(struct sptree_root *root, unsigned long addr)
 	prealloc_connect(root, prealloc);
 
 	// this will remove the replaced nodes
-	remove_old_nodes(old);
+	prealloc_remove_old(old);
 
 	// TODO: remove once code stable
 	validate_avl_balancing(root);
