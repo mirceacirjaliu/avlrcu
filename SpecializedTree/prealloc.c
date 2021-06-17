@@ -1303,10 +1303,6 @@ static struct sptree_node *unwind_delete_retrace(struct sptree_root *root, struc
  * (the node on the old path also has to be deleted), then retrace can create new nodes on the
  * new path.
  *
- * TODO: Connecting the new branch in the tree deletes nodes not necessarily in the same order
- * as connections are made. Temporary holes may appear ?!
- * TODO: Old nodes should be chained and deleted (RCU) after insertion is done. At this point
- * no other walker can enter an old node, but old nodes can still be used by walkers.
  */
 int prealloc_delete(struct sptree_root *root, unsigned long addr)
 {
@@ -1323,12 +1319,15 @@ int prealloc_delete(struct sptree_root *root, unsigned long addr)
 
 	// parent may contain L/R flags or NULL
 	parent = target->parent;
-	pbranch = get_pnode(root, parent);
 
 	/* may return NULL as a valid value */
 	prealloc = unwind_delete_retrace(root, target, &old);
 	if (IS_ERR(prealloc))
 		return PTR_ERR(prealloc);
+
+	if (prealloc)
+		parent = prealloc->parent;
+	pbranch = get_pnode(root, parent);
 
 	// connect the preallocated branch
 	prealloc_connect(pbranch, prealloc);
