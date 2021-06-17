@@ -365,28 +365,28 @@ error:
 
 /**
  * prealloc_connect() - insert the new branch in a tree
- * @root:	The root of the tree
+ * @pbranch:	The place where new branch will be connected
  * @branch:	The root of the new branch/subtree
  *
  * Used on insertion/deletion. The new branch can be:
+ * - NULL (empty branch) when deleting a leaf node
  * - a single node or a branch for insertion
- * - NULL when deleting the only node in a tree (empty branch)
- * - a subtree for deletion
+ * - a single node or a subtree for deletion
+ *
+ * The connections must be made in reverse-post-order (RLN), clockwise,
+ * starting from the rightmost node of the new branch and finishing at root,
+ * so when an in-order tree walk returns from a connected subtree,
+ * it returns into the new branch and stays there.
+ * Searches will start in the old branch and will stay there.
  */
-static void prealloc_connect(struct sptree_root *root, struct sptree_node *branch)
+static void prealloc_connect(struct sptree_node **pbranch, struct sptree_node *branch)
 {
-	struct sptree_node *parent, **pbranch;
 	struct sptree_iterator io;
 	struct sptree_node *next;
 
-	// parent may contain L/R flags or NULL
-	parent = branch == NULL ? NULL : branch->parent;
-	pbranch = get_pnode(root, parent);
+	pr_info("%s: at "NODE_FMT"\n", __func__, NODE_ARG(branch));
 
-	// first link root (iterators entering here must find a way out)
-	WRITE_ONCE(*pbranch, branch);
-
-	// in-order traversal of links
+	// reverse-post-order traversal of links
 	io.node = branch;
 	io.state = ITER_UP;
 
@@ -394,25 +394,10 @@ static void prealloc_connect(struct sptree_root *root, struct sptree_node *branc
 		switch (io.state)
 		{
 		case ITER_UP:
-			next = io.node->left;			// move to left node
-			if (next) {
-				if (is_new_branch(next)) {
-					io.node = next;
-					break;			// switch
-				}
-				else {
-					WRITE_ONCE(next->parent, make_left(io.node));
-					io.state = ITER_LEFT;
-					// fallback
-				}
-			}
-
-		case ITER_LEFT:
 			next = io.node->right;			// move to right node
 			if (next) {
 				if (is_new_branch(next)) {
-					io.node = next;
-					io.state = ITER_UP;
+					io.node = next;		// continue the right path
 					break;			// switch
 				}
 				else {
@@ -423,19 +408,32 @@ static void prealloc_connect(struct sptree_root *root, struct sptree_node *branc
 			}
 
 		case ITER_RIGHT:
-			next = strip_flags(io.node->parent);	// move to parent
-			if (next && is_new_branch(next)) {
-				if (is_left_child(io.node->parent))
+			next = io.node->left;			// move to the left node
+			if (next) {
+				if (is_new_branch(next)) {
+					io.node = next;
+					io.state = ITER_UP;	// another subtree
+					break;			// switch
+				}
+				else {
+					WRITE_ONCE(next->parent, make_left(io.node));
 					io.state = ITER_LEFT;
-			}
-			else {
-				next = NULL;			// out of new branch
-				io.state = ITER_DONE;		// done!
+					// fallback
+				}
 			}
 
-			// delete old node before exiting this one
-			//kfree_rcu(io.node->old, rcu);
-			//io.node->old = NULL;
+		case ITER_LEFT:
+			next = strip_flags(io.node->parent);	// move to parent
+			if (next && is_new_branch(next)) {
+				if (!is_left_child(io.node->parent))
+					io.state = ITER_RIGHT;
+			}
+			else {
+				WRITE_ONCE(*pbranch, branch);	// finally link root
+				io.state = ITER_DONE;		// done!
+				next = NULL;			// out of new branch
+			}
+
 			io.node->new_branch = 0;
 
 			io.node = next;				// finally move to parent
@@ -465,7 +463,7 @@ static void prealloc_remove_old(struct sptree_node *old)
 /* entry point */
 int prealloc_insert(struct sptree_root *root, unsigned long addr)
 {
-	struct sptree_node *crnt, *parent;
+	struct sptree_node *crnt, *parent, **pbranch;
 	struct sptree_node *node;
 	struct sptree_node *prealloc;
 	struct sptree_node *old = NULL;
@@ -501,8 +499,12 @@ int prealloc_insert(struct sptree_root *root, unsigned long addr)
 	if (!prealloc)
 		return -ENOMEM;
 
+	// parent may contain L/R flags or NULL
+	parent = prealloc->parent;
+	pbranch = get_pnode(root, parent);
+
 	// connect the preallocated branch
-	prealloc_connect(root, prealloc);
+	prealloc_connect(pbranch, prealloc);
 
 	// this will remove the replaced nodes
 	prealloc_remove_old(old);
@@ -690,11 +692,14 @@ static void prealloc_change_height(struct sptree_node *subtree, int diff)
 	struct sptree_node *parent;
 	bool left;
 
+	pr_info("%s: starting at "NODE_FMT"\n", __func__, NODE_ARG(subtree));
+
 	// parent may contain L/R flags or NULL, strip flags before using as pointer
 	for (parent = subtree->parent; !is_root(parent); parent = parent->parent) {
 		left = is_left_child(parent);
 		parent = strip_flags(parent);
 
+		// act only on the new branch
 		if (!is_new_branch(parent))
 			break;
 
@@ -1023,10 +1028,11 @@ static struct sptree_node *prealloc_unwind_right(struct sptree_root *root, struc
 	return target->right;
 }
 
-/* WARNING: this function does not return the top of the breallocated branch,
- * but the bottom - which represents the initial target node bubbled down to a leaf */
 /* this is called only if the node is not a leaf, so must return a preallocated branch != NULL */
 /* will return NULL on error */
+/* WARNING: this function does not return the top of the breallocated branch,
+ * but the bottom - which represents the initial target node bubbled down to a leaf */
+/* TODO: this is only used for deletion, might as well return the top of the preallocated branch */
 static struct sptree_node *_prealloc_unwind(struct sptree_root *root, struct sptree_node *target, struct sptree_node **old)
 {
 	struct sptree_node *prealloc, *parent;
@@ -1094,7 +1100,7 @@ error:
 // TODO: temp entry point for testing the unwind function
 int prealloc_unwind(struct sptree_root *root, unsigned long addr)
 {
-	struct sptree_node *target, *parent;
+	struct sptree_node *target, *parent, **pbranch;
 	struct sptree_node *prealloc;
 	struct sptree_node *old = NULL;
 
@@ -1114,8 +1120,12 @@ int prealloc_unwind(struct sptree_root *root, unsigned long addr)
 		prealloc = parent;
 	// walk the parent to the top of the preallocated branch
 
+	// parent may contain L/R flags or NULL
+	parent = prealloc->parent;
+	pbranch = get_pnode(root, parent);
+
 	// connect the preallocated branch
-	prealloc_connect(root, prealloc);
+	prealloc_connect(pbranch, prealloc);
 
 	// this will remove the replaced nodes
 	prealloc_remove_old(old);
@@ -1300,7 +1310,7 @@ static struct sptree_node *unwind_delete_retrace(struct sptree_root *root, struc
  */
 int prealloc_delete(struct sptree_root *root, unsigned long addr)
 {
-	struct sptree_node *target;
+	struct sptree_node *target, *parent, **pbranch;
 	struct sptree_node *prealloc;
 	struct sptree_node *old = NULL;
 
@@ -1311,13 +1321,17 @@ int prealloc_delete(struct sptree_root *root, unsigned long addr)
 	if (!target)
 		return -ENXIO;
 
+	// parent may contain L/R flags or NULL
+	parent = target->parent;
+	pbranch = get_pnode(root, parent);
+
 	/* may return NULL as a valid value */
 	prealloc = unwind_delete_retrace(root, target, &old);
 	if (IS_ERR(prealloc))
 		return PTR_ERR(prealloc);
 
 	// connect the preallocated branch
-	prealloc_connect(root, prealloc);
+	prealloc_connect(pbranch, prealloc);
 
 	// this will remove the replaced nodes
 	prealloc_remove_old(old);
