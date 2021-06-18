@@ -11,6 +11,7 @@
 
 #include "tree.h"
 
+#define ASSERT(_expr) BUG_ON(!(_expr))
 
 /* delete prealloc branch/subtree in case of failure */
 /* the prealloc branch is not yet inserted in the tree */
@@ -384,7 +385,10 @@ static void prealloc_connect(struct sptree_node **pbranch, struct sptree_node *b
 	struct sptree_iterator io;
 	struct sptree_node *next;
 
-	pr_info("%s: at "NODE_FMT"\n", __func__, NODE_ARG(branch));
+	if (branch == NULL)
+		pr_info("%s: at (EMPTY)\n", __func__);
+	else
+		pr_info("%s: at "NODE_FMT"\n", __func__, NODE_ARG(branch));
 
 	/* reverse-post-order traversal of links */
 	io.node = branch;
@@ -684,8 +688,12 @@ static struct sptree_node *prealloc_child(struct sptree_node *target, int which_
  * @subtree:	- root of the subtree that changed height during a rotation
  * @diff	- height diff +-1
  *
- * Under certain conditions, the height of the subtree changes, and
+ * Under certain operations, the height of the subtree changes, and
  * the changes must be propagated up to the root (of the new branch).
+ * If a subtree is rotated, the balances of the root & pivot are changed b
+ * the rotation, but the height diff is propagated starting with the parent.
+ * On a node deletion, the node is bubbled down to a leaf node and deleted,
+ * there is a decrease in height starting with the parent of the deleted leaf.
  */
 static void prealloc_change_height(struct sptree_node *subtree, int diff)
 {
@@ -1153,11 +1161,10 @@ int prealloc_unwind(struct sptree_root *root, unsigned long addr)
  * Then a retrace must be done to propagate the diff in height.
  * Can not return NULL as a valid value.
  */
-static struct sptree_node *delete_retrace(struct sptree_root *root, struct sptree_node *leaf, struct sptree_node *stop, struct sptree_node **old)
+static struct sptree_node *delete_retrace(struct sptree_root *root, struct sptree_node *leaf, struct sptree_node **old)
 {
 	struct sptree_node *parent = get_parent(leaf);
 	struct sptree_iterator iter;
-	bool retrace = true;
 
 	pr_info("%s: at "NODE_FMT"\n", __func__, NODE_ARG(leaf));
 
@@ -1168,10 +1175,6 @@ static struct sptree_node *delete_retrace(struct sptree_root *root, struct sptre
 			return ERR_PTR(-ENOMEM);
 	}
 	/* else, we're already working on the new branch */
-
-	/* delete the leaf directly if it's part of the new branch */
-	if (is_new_branch(leaf))
-		kfree(leaf);
 
 	/* clear pointer in parent pointing to the leaf & init parent iterator */
 	if (is_left_child(leaf->parent)) {
@@ -1184,84 +1187,49 @@ static struct sptree_node *delete_retrace(struct sptree_root *root, struct sptre
 	}
 	iter.node = parent;
 
+	/* fix step - running only on the new branch */
+	ASSERT(is_new_branch(parent));
 
+	/* the leaf node will be deleted, propagate the change up the new branch */
+	prealloc_change_height(leaf, -1);
 
+	/* delete the leaf directly if it's part of the new branch */
+	if (is_new_branch(leaf))
+		kfree(leaf);
 
-
-	// TODO: from now on, the code is bad...
-
-	/* nodes along this branch may be heavy towards the leaf or balanced */
-	/* if they heavy - make the node balanced & continue */
-	/* if they balanced - unbalance towards the other side & stop (the retrace) */
-	/* if they double heavy - double rotation & continue */
-	while (iter.node) {
-
-		if (!is_new_branch(iter.node)) {
-			iter.node = prealloc_parent(iter.node, old);
-			if (!iter.node)
-				return ERR_PTR(-ENOMEM);
-		}
-
-		/* retrace means we still have to compensate the height decrease due to deletion */
-		if (retrace) {
-			switch (iter.node->balance)
-			{
-			case -2:
-				BUG_ON(iter.state != ITER_LEFT);
-				iter.node->balance = -1;
-				retrace = false;
-				break;
-
-			case -1:
-			case 1:
-				iter.node->balance = 0;
-				break;
-
-			case 2:
-				BUG_ON(iter.state != ITER_RIGHT);
-				iter.node->balance = 1;
-				retrace = false;
-				break;
-
-			case 0:
-				if (iter.state == ITER_LEFT)
-					iter.node->balance = 1;
-				else
-					iter.node->balance = -1;
-				retrace = false;
-				break;
-			}
-		}
-		else
-		{
-			switch (iter.node->balance)
-			{
-			case -2:
-				iter.node = prealloc_rlr(root, iter.node, old);
-				if (!iter.node)
-					return ERR_PTR(-ENOMEM);
-				break;
-
-			case 2:
-				iter.node = prealloc_rrl(root, iter.node, old);
-				if (!iter.node)
-					return ERR_PTR(-ENOMEM);
-				break;
-			}
-		}
-
-		/* fixing step stops when reaching the initial parent, retracing may continue */
-		parent = get_parent(iter.node);
-		if (parent == stop)
+	/* walk up the new branch & look for excessive unbalancing */
+	while (true) {
+		switch (iter.node->balance) {
+		case -2:
+			ASSERT(iter.state = ITER_LEFT);
+			iter.node = prealloc_rlr(root, iter.node, old);
 			break;
 
-		/* move to parent */
+		case 2:
+			ASSERT(iter.state = ITER_RIGHT);
+			iter.node = prealloc_rrl(root, iter.node, old);
+			break;
+		}
+
+		parent = get_parent(iter.node);
+
+		/* stop & allow the func to return the root of the new branch */
+		if (is_root(parent) || !is_new_branch(parent))
+			break;
+
+		/* go up the new branch */
+		iter.node = parent;
 		if (is_left_child(iter.node->parent))
 			iter.state = ITER_LEFT;
 		else
 			iter.state = ITER_RIGHT;
-		iter.node = get_parent(iter.node);
 	}
+
+	// TODO: rest of the retracing (parent contains the link point of the new branch)
+	// ...
+
+	// TODO: how do we realize if the subtree whose root is deleted loses height ???
+	// ...
 
 	return iter.node;
 }
@@ -1272,11 +1240,6 @@ static struct sptree_node *unwind_delete_retrace(struct sptree_root *root, struc
 {
 	struct sptree_node *prealloc;
 	struct sptree_node *leaf;
-
-	// TODO: if needed, save the parent of node before unwind
-	// TODO: this will also be the parent of the new branch
-	// TODO: fixing stops here and from here to root we do retrace
-	struct sptree_node *stop = get_parent(node);
 
 	// TODO: or mix fixing with retrace and don't care about this parent, ascend as needed
 	// (right now, height propagation is done only on the new branch)
@@ -1316,7 +1279,7 @@ static struct sptree_node *unwind_delete_retrace(struct sptree_root *root, struc
 	/* in the corner case of a leaf node being deleted, it is considered that the subtree represented
 	 * by that node decreseas in height, so retrace creates a branch starting with its parent */
 
-	prealloc = delete_retrace(root, leaf, stop, old);
+	prealloc = delete_retrace(root, leaf, old);
 	if (IS_ERR(prealloc))
 		return prealloc;
 
