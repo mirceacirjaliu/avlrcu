@@ -386,11 +386,11 @@ static void prealloc_connect(struct sptree_node **pbranch, struct sptree_node *b
 
 	pr_info("%s: at "NODE_FMT"\n", __func__, NODE_ARG(branch));
 
-	// reverse-post-order traversal of links
+	/* reverse-post-order traversal of links */
 	io.node = branch;
 	io.state = ITER_UP;
 
-	while (io.node) {
+	while (likely(io.node)) {
 		switch (io.state)
 		{
 		case ITER_UP:
@@ -429,7 +429,6 @@ static void prealloc_connect(struct sptree_node **pbranch, struct sptree_node *b
 					io.state = ITER_RIGHT;
 			}
 			else {
-				WRITE_ONCE(*pbranch, branch);	// finally link root
 				io.state = ITER_DONE;		// done!
 				next = NULL;			// out of new branch
 			}
@@ -442,11 +441,12 @@ static void prealloc_connect(struct sptree_node **pbranch, struct sptree_node *b
 		default:
 			pr_err("%s: unhandled iterator state\n", __func__);
 			BUG();
-			io.node = NULL;				// cancels iteration
-			io.state = ITER_DONE;
-			break;
+			return;
 		}
 	}
+
+	/* ...or degenerate case (empty new branch) */
+	WRITE_ONCE(*pbranch, branch);				// finally link root
 }
 
 static void prealloc_remove_old(struct sptree_node *old)
@@ -1029,10 +1029,9 @@ static struct sptree_node *prealloc_unwind_right(struct sptree_root *root, struc
 }
 
 /* this is called only if the node is not a leaf, so must return a preallocated branch != NULL */
+/* it takes the initial target node and bubbles it down to a leaf node -> which will later be deleted */
 /* will return NULL on error */
-/* WARNING: this function does not return the top of the breallocated branch,
- * but the bottom - which represents the initial target node bubbled down to a leaf */
-/* TODO: this is only used for deletion, might as well return the top of the preallocated branch */
+/* WARNING: this function does not return the top of the breallocated branch, but the bottom */
 static struct sptree_node *_prealloc_unwind(struct sptree_root *root, struct sptree_node *target, struct sptree_node **old)
 {
 	struct sptree_node *prealloc, *parent;
@@ -1111,6 +1110,10 @@ int prealloc_unwind(struct sptree_root *root, unsigned long addr)
 	if (!target)
 		return -ENXIO;
 
+	// nothing to do in this case
+	if (is_leaf(target))
+		return 0;
+
 	prealloc = _prealloc_unwind(root, target, &old);
 	if (!prealloc)
 		return -ENOMEM;
@@ -1136,7 +1139,20 @@ int prealloc_unwind(struct sptree_root *root, unsigned long addr)
 	return 0;
 }
 
-/* can return NULL as a valid value if the deleted leaf is the only node in the tree */
+/**
+ * delete_retrace() - deletes a leaf node from the old/new branch and does retrace
+ * @root - root of the tree
+ * @leaf - leaf node to be removed (may belong to old/new branch)
+ * @stop - parent (NULL if root) where fixing the new branch stops and retracing begins (TODO: is this needed?)
+ * @old	 - chain of old nodes (TODO: put this in a context)
+ *
+ * Leaf may not be root, it must have a parent (this has been checked in the caller).
+ * If the leaf is not already in the new branch, it creates an ascending new branch starting at its parent.
+ * Then it decouples leaf from the new branch.
+ * If the new branch exists, its height may decrease and must be fixed after delete.
+ * Then a retrace must be done to propagate the diff in height.
+ * Can not return NULL as a valid value.
+ */
 static struct sptree_node *delete_retrace(struct sptree_root *root, struct sptree_node *leaf, struct sptree_node *stop, struct sptree_node **old)
 {
 	struct sptree_node *parent = get_parent(leaf);
@@ -1145,16 +1161,17 @@ static struct sptree_node *delete_retrace(struct sptree_root *root, struct sptre
 
 	pr_info("%s: at "NODE_FMT"\n", __func__, NODE_ARG(leaf));
 
-	/* only node in the tree */
-	if (is_root(parent))
-		return NULL;
-	/* node was already leaf, no unwind happened */
-	else if (!is_new_branch(parent)) {
+	/* node was already leaf, no unwinding happened */
+	if (!is_new_branch(parent)) {
 		parent = prealloc_parent(parent, old);
 		if (!parent)
 			return ERR_PTR(-ENOMEM);
 	}
 	/* else, we're already working on the new branch */
+
+	/* delete the leaf directly if it's part of the new branch */
+	if (is_new_branch(leaf))
+		kfree(leaf);
 
 	/* clear pointer in parent pointing to the leaf & init parent iterator */
 	if (is_left_child(leaf->parent)) {
@@ -1166,6 +1183,12 @@ static struct sptree_node *delete_retrace(struct sptree_root *root, struct sptre
 		parent->right = NULL;
 	}
 	iter.node = parent;
+
+
+
+
+
+	// TODO: from now on, the code is bad...
 
 	/* nodes along this branch may be heavy towards the leaf or balanced */
 	/* if they heavy - make the node balanced & continue */
@@ -1256,10 +1279,16 @@ static struct sptree_node *unwind_delete_retrace(struct sptree_root *root, struc
 	struct sptree_node *stop = get_parent(node);
 
 	// TODO: or mix fixing with retrace and don't care about this parent, ascend as needed
+	// (right now, height propagation is done only on the new branch)
 
 	if (is_leaf(node)) {
 		node->old = *old;						/* this node will be deleted */
 		*old = node;							/* add to chain of old nodes */
+
+		/* if that node is the only node in the tree, the new branch is empty (NULL) */
+		if (is_root(node->parent))
+			return NULL;
+
 		leaf = node;
 	}
 	else {
@@ -1286,7 +1315,7 @@ static struct sptree_node *unwind_delete_retrace(struct sptree_root *root, struc
 
 	/* in the corner case of a leaf node being deleted, it is considered that the subtree represented
 	 * by that node decreseas in height, so retrace creates a branch starting with its parent */
-	/* CORNER CASE: if that node is the only node in the tree, the new branch is empty (NULL) */
+
 	prealloc = delete_retrace(root, leaf, stop, old);
 	if (IS_ERR(prealloc))
 		return prealloc;
