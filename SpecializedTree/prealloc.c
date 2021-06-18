@@ -1190,8 +1190,17 @@ static struct sptree_node *delete_retrace(struct sptree_root *root, struct sptre
 	/* fix step - running only on the new branch */
 	ASSERT(is_new_branch(parent));
 
-	/* the leaf node will be deleted, propagate the change up the new branch */
-	prealloc_change_height(leaf, -1);
+	/* nodes along this branch may be heavy towards the leaf or balanced
+	 * this also applies to its direct parent, if it's leaf-heavy,
+	 * deleting the leaf will propagate the change up the new branch */
+	if (parent->balance != 0)
+		prealloc_change_height(leaf, -1);
+	else {
+		if (is_left_child(leaf->parent))
+			parent->balance = 1;
+		else
+			parent->balance = -1;
+	}
 
 	/* delete the leaf directly if it's part of the new branch */
 	if (is_new_branch(leaf))
