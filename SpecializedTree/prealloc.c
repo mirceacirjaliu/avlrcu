@@ -21,9 +21,13 @@ static void sptree_ctxt_init(struct sptree_ctxt *ctxt, struct sptree_root *root)
 	ctxt->diff = 0;
 }
 
-/* delete prealloc branch/subtree in case of failure */
-/* the prealloc branch is not yet inserted in the tree */
-/* will do a post-order walk and delete the nodes */
+/**
+ * _delete_prealloc() - delete prealloc branch/subtree in case of failure
+ * @prealloc:		The root of the new branch
+ *
+ * The prealloc branch is not yet inserted into the tree.
+ * Will do a post-order walk and delete the nodes.
+ */
 /* TODO: will have to receive thr root arg for ops->free() instead of kfree */
 static void _delete_prealloc(struct sptree_node *prealloc)
 {
@@ -85,6 +89,113 @@ static void _delete_prealloc(struct sptree_node *prealloc)
 		}
 	}
 }
+
+/**
+ * prealloc_connect() - insert the new branch in a tree
+ * @pbranch:	The place where new branch will be connected
+ * @branch:	The root of the new branch/subtree
+ *
+ * Used on insertion/deletion. The new branch can be:
+ * - NULL (empty branch) when deleting a leaf node
+ * - a single node or a branch for insertion
+ * - a single node or a subtree for deletion
+ *
+ * The connections must be made in reverse-post-order (RLN), clockwise,
+ * starting from the rightmost node of the new branch and finishing at root,
+ * so when an in-order tree walk returns from a connected subtree,
+ * it returns into the new branch and stays there.
+ * Searches will start in the old branch and will stay there.
+ */
+static void prealloc_connect(struct sptree_node **pbranch, struct sptree_node *branch)
+{
+	struct sptree_iterator io;
+	struct sptree_node *next;
+
+	if (branch == NULL)
+		pr_info("%s: at (EMPTY)\n", __func__);
+	else
+		pr_info("%s: at "NODE_FMT"\n", __func__, NODE_ARG(branch));
+
+	/* reverse-post-order traversal of links */
+	io.node = branch;
+	io.state = ITER_UP;
+
+	while (likely(io.node)) {
+		switch (io.state)
+		{
+		case ITER_UP:
+			next = io.node->right;			// move to right node
+			if (next) {
+				if (is_new_branch(next)) {
+					io.node = next;		// continue the right path
+					break;			// switch
+				}
+				else {
+					WRITE_ONCE(next->parent, make_right(io.node));
+					io.state = ITER_RIGHT;
+					// fallback
+				}
+			}
+
+		case ITER_RIGHT:
+			next = io.node->left;			// move to the left node
+			if (next) {
+				if (is_new_branch(next)) {
+					io.node = next;
+					io.state = ITER_UP;	// another subtree
+					break;			// switch
+				}
+				else {
+					WRITE_ONCE(next->parent, make_left(io.node));
+					io.state = ITER_LEFT;
+					// fallback
+				}
+			}
+
+		case ITER_LEFT:
+			next = strip_flags(io.node->parent);	// move to parent
+			if (next && is_new_branch(next)) {
+				if (!is_left_child(io.node->parent))
+					io.state = ITER_RIGHT;
+			}
+			else {
+				io.state = ITER_DONE;		// done!
+				next = NULL;			// out of new branch
+			}
+
+			io.node->new_branch = 0;
+
+			io.node = next;				// finally move to parent
+			break;					// switch
+
+		default:
+			pr_err("%s: unhandled iterator state\n", __func__);
+			BUG();
+			return;
+		}
+	}
+
+	/* ...or degenerate case (empty new branch) */
+	WRITE_ONCE(*pbranch, branch);				// finally link root
+}
+
+/**
+ * prealloc_remove_old() - remove (RCU) nodes replaced by the new branch
+ * @old:	The chain of old nodes.
+ *
+ * All nodes in the old chain will be passed to RCU for deletion.
+ */
+static void prealloc_remove_old(struct sptree_node *old)
+{
+	struct sptree_node *temp;
+
+	while (old) {
+		temp = old->old;
+		kfree_rcu(old, rcu);
+		old = temp;
+	}
+}
+
 
 
 /* return new root to be set as top of branch */
@@ -372,106 +483,6 @@ error:
 	return NULL;
 };
 
-/**
- * prealloc_connect() - insert the new branch in a tree
- * @pbranch:	The place where new branch will be connected
- * @branch:	The root of the new branch/subtree
- *
- * Used on insertion/deletion. The new branch can be:
- * - NULL (empty branch) when deleting a leaf node
- * - a single node or a branch for insertion
- * - a single node or a subtree for deletion
- *
- * The connections must be made in reverse-post-order (RLN), clockwise,
- * starting from the rightmost node of the new branch and finishing at root,
- * so when an in-order tree walk returns from a connected subtree,
- * it returns into the new branch and stays there.
- * Searches will start in the old branch and will stay there.
- */
-static void prealloc_connect(struct sptree_node **pbranch, struct sptree_node *branch)
-{
-	struct sptree_iterator io;
-	struct sptree_node *next;
-
-	if (branch == NULL)
-		pr_info("%s: at (EMPTY)\n", __func__);
-	else
-		pr_info("%s: at "NODE_FMT"\n", __func__, NODE_ARG(branch));
-
-	/* reverse-post-order traversal of links */
-	io.node = branch;
-	io.state = ITER_UP;
-
-	while (likely(io.node)) {
-		switch (io.state)
-		{
-		case ITER_UP:
-			next = io.node->right;			// move to right node
-			if (next) {
-				if (is_new_branch(next)) {
-					io.node = next;		// continue the right path
-					break;			// switch
-				}
-				else {
-					WRITE_ONCE(next->parent, make_right(io.node));
-					io.state = ITER_RIGHT;
-					// fallback
-				}
-			}
-
-		case ITER_RIGHT:
-			next = io.node->left;			// move to the left node
-			if (next) {
-				if (is_new_branch(next)) {
-					io.node = next;
-					io.state = ITER_UP;	// another subtree
-					break;			// switch
-				}
-				else {
-					WRITE_ONCE(next->parent, make_left(io.node));
-					io.state = ITER_LEFT;
-					// fallback
-				}
-			}
-
-		case ITER_LEFT:
-			next = strip_flags(io.node->parent);	// move to parent
-			if (next && is_new_branch(next)) {
-				if (!is_left_child(io.node->parent))
-					io.state = ITER_RIGHT;
-			}
-			else {
-				io.state = ITER_DONE;		// done!
-				next = NULL;			// out of new branch
-			}
-
-			io.node->new_branch = 0;
-
-			io.node = next;				// finally move to parent
-			break;					// switch
-
-		default:
-			pr_err("%s: unhandled iterator state\n", __func__);
-			BUG();
-			return;
-		}
-	}
-
-	/* ...or degenerate case (empty new branch) */
-	WRITE_ONCE(*pbranch, branch);				// finally link root
-}
-
-static void prealloc_remove_old(struct sptree_node *old)
-{
-	struct sptree_node *temp;
-
-	while (old) {
-		temp = old->old;
-		kfree_rcu(old, rcu);
-		old = temp;
-	}
-}
-
 /* entry point */
 int prealloc_insert(struct sptree_root *root, unsigned long addr)
 {
@@ -528,17 +539,6 @@ int prealloc_insert(struct sptree_root *root, unsigned long addr)
 
 	return 0;
 }
-
-
-
-
-
-
-
-
-
-
-
 
 
 
