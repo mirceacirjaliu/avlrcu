@@ -35,6 +35,13 @@ struct sptree_root {
 	struct sptree_node *root;
 };
 
+/* context for insert/delete operations */
+struct sptree_ctxt {
+	struct sptree_root *root;
+	struct sptree_node *old;
+	int diff;
+};
+
 extern void validate_avl_balancing(struct sptree_root *root);
 
 // flags set on parent pointer to fast determine on which side of the parent we are

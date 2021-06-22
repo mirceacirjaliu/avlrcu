@@ -13,6 +13,14 @@
 
 #define ASSERT(_expr) BUG_ON(!(_expr))
 
+
+static void sptree_ctxt_init(struct sptree_ctxt *ctxt, struct sptree_root *root)
+{
+	ctxt->root = root;
+	ctxt->old = NULL;
+	ctxt->diff = 0;
+}
+
 /* delete prealloc branch/subtree in case of failure */
 /* the prealloc branch is not yet inserted in the tree */
 /* will do a post-order walk and delete the nodes */
@@ -259,7 +267,7 @@ static struct sptree_node *prealloc_retrace_rrl(struct sptree_node *root)
 }
 
 /* retrace for insert */
-static struct sptree_node *prealloc_retrace(struct sptree_root *root, struct sptree_node *node, struct sptree_node **old)
+static struct sptree_node *prealloc_retrace(struct sptree_ctxt *ctxt, struct sptree_node *node)
 {
 	struct sptree_node *parent;
 	struct sptree_node *branch = node;
@@ -280,8 +288,8 @@ static struct sptree_node *prealloc_retrace(struct sptree_root *root, struct spt
 		memcpy(new_parent, parent, sizeof(*new_parent));
 		new_parent->new_branch = 1;
 
-		parent->old = *old;						/* this node will be replaced */
-		*old = parent;							/* add to chain of old nodes */
+		parent->old = ctxt->old;					/* this node will be replaced */
+		ctxt->old = parent;						/* add to chain of old nodes */
 
 		if (is_left_child(node->parent)) {
 			pr_info("%s: node "NODE_FMT" is left child of "NODE_FMT"\n", __func__,
@@ -468,9 +476,8 @@ static void prealloc_remove_old(struct sptree_node *old)
 int prealloc_insert(struct sptree_root *root, unsigned long addr)
 {
 	struct sptree_node *crnt, *parent, **pbranch;
-	struct sptree_node *node;
 	struct sptree_node *prealloc;
-	struct sptree_node *old = NULL;
+	struct sptree_ctxt ctxt;
 
 	if (!address_valid(root, addr))
 		return -EINVAL;
@@ -489,17 +496,19 @@ int prealloc_insert(struct sptree_root *root, unsigned long addr)
 		}
 	}
 
-	/* alloc the node & fill it - this is the first node in the preallocated branch */
-	node = kzalloc(sizeof(*node), GFP_ATOMIC);
-	if (!node)
+	/* alloc the new node & fill it - this is the first node in the preallocated branch */
+	prealloc = kzalloc(sizeof(*prealloc), GFP_ATOMIC);
+	if (!prealloc)
 		return -ENOMEM;
 
-	node->start = addr;
-	node->parent = parent;		/* only link one way */
-	node->new_branch = 1;
+	prealloc->start = addr;
+	prealloc->parent = parent;		/* only link one way */
+	prealloc->new_branch = 1;
+
+	sptree_ctxt_init(&ctxt, root);
 
 	/* retrace generates the preallocated branch */
-	prealloc = prealloc_retrace(root, node, &old);
+	prealloc = prealloc_retrace(&ctxt, prealloc);
 	if (!prealloc)
 		return -ENOMEM;
 
@@ -511,7 +520,8 @@ int prealloc_insert(struct sptree_root *root, unsigned long addr)
 	prealloc_connect(pbranch, prealloc);
 
 	// this will remove the replaced nodes
-	prealloc_remove_old(old);
+	if (ctxt.old)
+		prealloc_remove_old(ctxt.old);
 
 	// TODO: remove once code stable
 	validate_avl_balancing(root);
