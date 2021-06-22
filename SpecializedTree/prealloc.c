@@ -690,7 +690,7 @@ static struct sptree_node *prealloc_child(struct sptree_node *target, int which_
  *
  * Under certain operations, the height of the subtree changes, and
  * the changes must be propagated up to the root (of the new branch).
- * If a subtree is rotated, the balances of the root & pivot are changed b
+ * If a subtree is rotated, the balances of the root & pivot are changed by
  * the rotation, but the height diff is propagated starting with the parent.
  * On a node deletion, the node is bubbled down to a leaf node and deleted,
  * there is a decrease in height starting with the parent of the deleted leaf.
@@ -698,7 +698,7 @@ static struct sptree_node *prealloc_child(struct sptree_node *target, int which_
 static void prealloc_change_height(struct sptree_node *subtree, int diff)
 {
 	struct sptree_node *parent;
-	bool left;
+	bool left, balanced_before;
 
 	pr_info("%s: starting at "NODE_FMT"\n", __func__, NODE_ARG(subtree));
 
@@ -711,10 +711,21 @@ static void prealloc_change_height(struct sptree_node *subtree, int diff)
 		if (!is_new_branch(parent))
 			break;
 
+		// parent was balanced before applying the diff
+		balanced_before = (parent->balance == 0);
+
 		if (left)
 			parent->balance -= diff;
 		else
 			parent->balance += diff;
+
+		// on delete, the propagation stops when it encounters a balanced parent
+		// (the height of the subtree remains unchanged)
+		if (diff == -1 && balanced_before) {
+			pr_info("%s: stop update balance factor at "NODE_FMT"\n",
+				__func__, NODE_ARG(parent));
+			break;
+		}
 
 		pr_info("%s: updated balance factor for "NODE_FMT"\n",
 			__func__, NODE_ARG(parent));
@@ -1193,14 +1204,10 @@ static struct sptree_node *delete_retrace(struct sptree_root *root, struct sptre
 	/* nodes along this branch may be heavy towards the leaf or balanced
 	 * this also applies to its direct parent, if it's leaf-heavy,
 	 * deleting the leaf will propagate the change up the new branch */
-	if (parent->balance != 0)
-		prealloc_change_height(leaf, -1);
-	else {
-		if (is_left_child(leaf->parent))
-			parent->balance = 1;
-		else
-			parent->balance = -1;
-	}
+	prealloc_change_height(leaf, -1);
+	// TODO: this case was included in prealloc_change_height()
+	// https://en.wikipedia.org/wiki/AVL_tree#:~:text=The%20retracing%20can%20stop%20if%20the%20balance%20factor%20becomes%20%C2%B11%20(it%20must%20have%20been%200)%20meaning%20that%20the%20height%20of%20that%20subtree%20remains%20unchanged.
+	// but it will have to be implemented overall in the fix/retrace algorithm
 
 	/* delete the leaf directly if it's part of the new branch */
 	if (is_new_branch(leaf))
@@ -1239,6 +1246,7 @@ static struct sptree_node *delete_retrace(struct sptree_root *root, struct sptre
 
 	// TODO: how do we realize if the subtree whose root is deleted loses height ???
 	// ...
+	// TODO: prealloc_change_height() can account for the overall change of height when the context will be created!!!
 
 	return iter.node;
 }
