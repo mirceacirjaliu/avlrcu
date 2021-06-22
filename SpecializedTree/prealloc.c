@@ -631,7 +631,7 @@ static struct balance_factors ror_new_balance(int root_bal, int pivot_bal)
 
 /* brings a parent to the new branch (one of the children is already on the new branch) */
 /* useful for retrace where the algorithm ascends */
-static struct sptree_node *prealloc_parent(struct sptree_node *parent, struct sptree_node **old)
+static struct sptree_node *prealloc_parent(struct sptree_ctxt *ctxt, struct sptree_node *parent)
 {
 	struct sptree_node *new_parent;
 
@@ -652,8 +652,8 @@ static struct sptree_node *prealloc_parent(struct sptree_node *parent, struct sp
 	if (is_new_branch(parent->right))
 		parent->right->parent = make_right(new_parent);
 
-	parent->old = *old;						/* this node will be replaced */
-	*old = parent;							/* add to chain of old nodes */
+	parent->old = ctxt->old;					/* this node will be replaced */
+	ctxt->old = parent;						/* add to chain of old nodes */
 
 	return new_parent;
 }
@@ -661,13 +661,13 @@ static struct sptree_node *prealloc_parent(struct sptree_node *parent, struct sp
 /* brings a child to the new branch  */
 /* only useful for unwind, cause it descents and must find a way down */
 /* the parent needs to be part of the new branch (the child points to old parent) */
-static struct sptree_node *prealloc_child(struct sptree_node *target, int which_child, struct sptree_node **old)
+static struct sptree_node *prealloc_child(struct sptree_ctxt *ctxt, struct sptree_node *parent, int which)
 {
-	struct sptree_node *child = which_child == LEFT_CHILD ? target->left : target->right;
+	struct sptree_node *child = which == LEFT_CHILD ? parent->left : parent->right;
 	struct sptree_node *new_child;
 
-	pr_info("%s: at "NODE_FMT"\n", __func__, NODE_ARG(target));
-	BUG_ON(!is_new_branch(target));
+	pr_info("%s: at "NODE_FMT"\n", __func__, NODE_ARG(parent));
+	BUG_ON(!is_new_branch(parent));
 	BUG_ON(!child);
 	BUG_ON(is_new_branch(child));
 
@@ -678,23 +678,23 @@ static struct sptree_node *prealloc_child(struct sptree_node *target, int which_
 	memcpy(new_child, child, sizeof(*new_child));			/* copy pivot */
 	new_child->new_branch = 1;
 
-	if (which_child == LEFT_CHILD) {
-		target->left = new_child;
-		new_child->parent = make_left(target);			/* create links on the new branch */
+	if (which == LEFT_CHILD) {
+		parent->left = new_child;
+		new_child->parent = make_left(parent);			/* create links on the new branch */
 	}
 	else {
-		target->right = new_child;
-		new_child->parent = make_right(target);			/* create links on the new branch */
+		parent->right = new_child;
+		new_child->parent = make_right(parent);			/* create links on the new branch */
 	}
 
-	child->old = *old;						/* this node will be replaced */
-	*old = child;							/* add to chain of old nodes */
+	child->old = ctxt->old;						/* this node will be replaced */
+	ctxt->old = child;						/* add to chain of old nodes */
 
 	return new_child;
 }
 
 /*
- * prealloc_change_height() - propagate height diff up the new branch
+ * prealloc_propagate_change() - propagate height diff up the new branch
  * @subtree:	- root of the subtree that changed height during a rotation
  * @diff	- height diff +-1
  *
@@ -705,7 +705,7 @@ static struct sptree_node *prealloc_child(struct sptree_node *target, int which_
  * On a node deletion, the node is bubbled down to a leaf node and deleted,
  * there is a decrease in height starting with the parent of the deleted leaf.
  */
-static void prealloc_change_height(struct sptree_node *subtree, int diff)
+static void prealloc_propagate_change(struct sptree_ctxt *ctxt, struct sptree_node *subtree, int diff)
 {
 	struct sptree_node *parent;
 	bool left, balanced_before;
@@ -734,16 +734,19 @@ static void prealloc_change_height(struct sptree_node *subtree, int diff)
 		if (diff == -1 && balanced_before) {
 			pr_info("%s: stop update balance factor at "NODE_FMT"\n",
 				__func__, NODE_ARG(parent));
-			break;
+			return;		// will not accumulate height diff
 		}
 
 		pr_info("%s: updated balance factor for "NODE_FMT"\n",
 			__func__, NODE_ARG(parent));
 	}
+
+	// accumulate height diff across the unwind + fix steps
+	ctxt->diff += diff;
 }
 
 /* generic rotation for unwind & fix steps */
-static struct sptree_node *prealloc_rol(struct sptree_root *root, struct sptree_node *target, struct sptree_node **old)
+static struct sptree_node *prealloc_rol(struct sptree_ctxt *ctxt, struct sptree_node *target)
 {
 	struct sptree_node *parent, **ptarget;
 	struct sptree_node *pivot = target->right;
@@ -757,7 +760,7 @@ static struct sptree_node *prealloc_rol(struct sptree_root *root, struct sptree_
 
 	/* copy pivot if not already part of the new branch */
 	if (!is_new_branch(pivot)) {
-		pivot = prealloc_child(target, RIGHT_CHILD, old);
+		pivot = prealloc_child(ctxt, target, RIGHT_CHILD);
 		if (!pivot)
 			return ERR_PTR(-ENOMEM);				/* only error output */
 	}
@@ -778,7 +781,7 @@ static struct sptree_node *prealloc_rol(struct sptree_root *root, struct sptree_
 
 	/* relink parents */
 	parent = strip_flags(target->parent);
-	ptarget = get_pnode(root, target->parent);
+	ptarget = get_pnode(ctxt->root, target->parent);
 
 	new_root->parent = target->parent;
 	if (parent && is_new_branch(parent))
@@ -791,12 +794,12 @@ static struct sptree_node *prealloc_rol(struct sptree_root *root, struct sptree_
 	new_root->balance = new_balance.root;
 	new_pivot->balance = new_balance.pivot;
 	if (diff_height)
-		prealloc_change_height(new_root, diff_height);
+		prealloc_propagate_change(ctxt, new_root, diff_height);
 
 	return new_root;
 }
 
-static struct sptree_node *prealloc_ror(struct sptree_root *root, struct sptree_node *target, struct sptree_node **old)
+static struct sptree_node *prealloc_ror(struct sptree_ctxt *ctxt, struct sptree_node *target)
 {
 	struct sptree_node *parent, **ptarget;
 	struct sptree_node *pivot = target->left;
@@ -810,7 +813,7 @@ static struct sptree_node *prealloc_ror(struct sptree_root *root, struct sptree_
 
 	/* copy pivot if not already part of the new branch */
 	if (!is_new_branch(pivot)) {
-		pivot = prealloc_child(target, LEFT_CHILD, old);
+		pivot = prealloc_child(ctxt, target, LEFT_CHILD);
 		if (!pivot)
 			return ERR_PTR(-ENOMEM);				/* only error output */
 	}
@@ -831,7 +834,7 @@ static struct sptree_node *prealloc_ror(struct sptree_root *root, struct sptree_
 
 	/* relink parents */
 	parent = strip_flags(target->parent);
-	ptarget = get_pnode(root, target->parent);
+	ptarget = get_pnode(ctxt->root, target->parent);
 
 	new_root->parent = target->parent;
 	if (parent && is_new_branch(parent))
@@ -844,12 +847,12 @@ static struct sptree_node *prealloc_ror(struct sptree_root *root, struct sptree_
 	new_root->balance = new_balance.root;
 	new_pivot->balance = new_balance.pivot;
 	if (diff_height)
-		prealloc_change_height(new_root, diff_height);
+		prealloc_propagate_change(ctxt, new_root, diff_height);
 
 	return new_root;
 }
 
-static struct sptree_node *prealloc_rrl(struct sptree_root *root, struct sptree_node *target, struct sptree_node **old)
+static struct sptree_node *prealloc_rrl(struct sptree_ctxt *ctxt, struct sptree_node *target)
 {
 	struct sptree_node *pivot = target->right;
 
@@ -858,23 +861,23 @@ static struct sptree_node *prealloc_rrl(struct sptree_root *root, struct sptree_
 
 	/* copy pivot if not already part of the new branch */
 	if (!is_new_branch(pivot)) {
-		pivot = prealloc_child(target, RIGHT_CHILD, old);
+		pivot = prealloc_child(ctxt, target, RIGHT_CHILD);
 		if (!pivot)
 			return ERR_PTR(-ENOMEM);				/* only error output */
 	}
 
 	/* first rotation */
-	pivot = prealloc_ror(root, pivot, old);
+	pivot = prealloc_ror(ctxt, pivot);
 	if (!pivot)
 		return ERR_PTR(-ENOMEM);
 
 	/* second rotation */
-	target = prealloc_rol(root, target, old);
+	target = prealloc_rol(ctxt, target);
 
 	return target;
 }
 
-static struct sptree_node *prealloc_rlr(struct sptree_root *root, struct sptree_node *target, struct sptree_node **old)
+static struct sptree_node *prealloc_rlr(struct sptree_ctxt *ctxt, struct sptree_node *target)
 {
 	struct sptree_node *pivot = target->left;
 
@@ -883,18 +886,18 @@ static struct sptree_node *prealloc_rlr(struct sptree_root *root, struct sptree_
 
 	/* copy pivot if not already part of the new branch */
 	if (!is_new_branch(pivot)) {
-		pivot = prealloc_child(target, LEFT_CHILD, old);
+		pivot = prealloc_child(ctxt, target, LEFT_CHILD);
 		if (!pivot)
 			return ERR_PTR(-ENOMEM);				/* only error output */
 	}
 
 	/* first rotation */
-	pivot = prealloc_rol(root, pivot, old);
+	pivot = prealloc_rol(ctxt, pivot);
 	if (!pivot)
 		return ERR_PTR(-ENOMEM);
 
 	/* second rotation */
-	target = prealloc_ror(root, target, old);
+	target = prealloc_ror(ctxt, target);
 
 	return target;
 }
@@ -905,20 +908,20 @@ static struct sptree_node *prealloc_rlr(struct sptree_root *root, struct sptree_
 
 
 
-static struct sptree_node *prealloc_reverse_rrl(struct sptree_root *root, struct sptree_node *target, struct sptree_node **old)
+static struct sptree_node *prealloc_reverse_rrl(struct sptree_ctxt *ctxt, struct sptree_node *target)
 {
 	struct sptree_node *subtree_root;
 
 	pr_info("%s: at "NODE_FMT"\n", __func__, NODE_ARG(target));
 
 	/* the new subtree root is established after the 1st rotation */
-	subtree_root = prealloc_ror(root, target, old);
+	subtree_root = prealloc_ror(ctxt, target);
 	if (IS_ERR(subtree_root))
 		return subtree_root;
 	target = subtree_root->right;
 
 	/* the 2nd rotation may add to the overall unbalancing/diff in height */
-	target = prealloc_rol(root, target, old);
+	target = prealloc_rol(ctxt, target);
 	if (IS_ERR(target))
 		return target;
 	target = target->left;
@@ -926,20 +929,20 @@ static struct sptree_node *prealloc_reverse_rrl(struct sptree_root *root, struct
 	return target;
 }
 
-static struct sptree_node *prealloc_reverse_rlr(struct sptree_root *root, struct sptree_node *target, struct sptree_node **old)
+static struct sptree_node *prealloc_reverse_rlr(struct sptree_ctxt *ctxt, struct sptree_node *target)
 {
 	struct sptree_node *subtree_root;
 
 	pr_info("%s: at "NODE_FMT"\n", __func__, NODE_ARG(target));
 
 	/* the new subtree root is established after the 1st rotation */
-	subtree_root = prealloc_rol(root, target, old);
+	subtree_root = prealloc_rol(ctxt, target);
 	if (IS_ERR(subtree_root))
 		return subtree_root;
 	target = subtree_root->left;
 
 	/* the 2nd rotation may add to the overall unbalancing/diff in height */
-	target = prealloc_ror(root, target, old);
+	target = prealloc_ror(ctxt, target);
 	if (IS_ERR(target))
 		return target;
 	target = target->right;
@@ -947,7 +950,7 @@ static struct sptree_node *prealloc_reverse_rlr(struct sptree_root *root, struct
 	return target;
 }
 
-static struct sptree_node *prealloc_unwind_double(struct sptree_root *root, struct sptree_node *target, struct sptree_node **old)
+static struct sptree_node *prealloc_unwind_double(struct sptree_ctxt *ctxt, struct sptree_node *target)
 {
 	struct sptree_node *left = target->left;
 	struct sptree_node *right = target->right;
@@ -958,11 +961,11 @@ static struct sptree_node *prealloc_unwind_double(struct sptree_root *root, stru
 
 	/* prealloc the left and right pivots,
 	 * both will be used in reverse compound rotations */
-	left = prealloc_child(target, LEFT_CHILD, old);
+	left = prealloc_child(ctxt, target, LEFT_CHILD);
 	if (!left)
 		return ERR_PTR(-ENOMEM);
 
-	right = prealloc_child(target, RIGHT_CHILD, old);
+	right = prealloc_child(ctxt, target, RIGHT_CHILD);
 	if (!right)
 		return ERR_PTR(-ENOMEM);
 
@@ -971,41 +974,41 @@ static struct sptree_node *prealloc_unwind_double(struct sptree_root *root, stru
 
 	// reverse RRL
 	if (left->balance == -1)
-		return prealloc_reverse_rrl(root, target, old);
+		return prealloc_reverse_rrl(ctxt, target);
 
 	// reverse RLR
 	if (right->balance == 1)
-		return prealloc_reverse_rlr(root, target, old);
+		return prealloc_reverse_rlr(ctxt, target);
 
 	// don't care: so reverse RRL
 	if (right->balance == 0 && left->balance == 0)
-		return prealloc_reverse_rrl(root, target, old);
+		return prealloc_reverse_rrl(ctxt, target);
 
 	// both poorly balanced: rebalance one of them
 	if (right->balance == -1 && left->balance == 1) {
 		// rebalance the right subtree, then apply case 2
-		temp = prealloc_ror(root, right, old);
+		temp = prealloc_ror(ctxt, right);
 		if (IS_ERR(temp))
 			return temp;
-		return prealloc_reverse_rlr(root, target, old);
+		return prealloc_reverse_rlr(ctxt, target);
 	}
 
 	// rebalance left
 	if (right->balance == 0 && left->balance == 1) {
 		// rebalance the left subtree, then apply case 1
-		temp = prealloc_rol(root, left, old);
+		temp = prealloc_rol(ctxt, left);
 		if (IS_ERR(temp))
 			return temp;
-		return prealloc_reverse_rrl(root, target, old);
+		return prealloc_reverse_rrl(ctxt, target);
 	}
 
 	// rebalance right
 	if (right->balance == -1 && left->balance == 0) {
 		// rebalance the right subtree, then apply case 2
-		temp = prealloc_ror(root, right, old);
+		temp = prealloc_ror(ctxt, right);
 		if (IS_ERR(temp))
 			return temp;
-		return prealloc_reverse_rlr(root, target, old);
+		return prealloc_reverse_rlr(ctxt, target);
 	} // TODO: this is the same case as "both poorly balanced", merge
 
 	/* did I miss something ? */
@@ -1016,7 +1019,7 @@ static struct sptree_node *prealloc_unwind_double(struct sptree_root *root, stru
 }
 
 /* target->balance == 1 */
-static struct sptree_node *prealloc_unwind_left(struct sptree_root *root, struct sptree_node *target, struct sptree_node **old)
+static struct sptree_node *prealloc_unwind_left(struct sptree_ctxt *ctxt, struct sptree_node *target)
 {
 	struct sptree_node *pivot = target->right;
 
@@ -1024,9 +1027,9 @@ static struct sptree_node *prealloc_unwind_left(struct sptree_root *root, struct
 	BUG_ON(!pivot);
 
 	if (pivot->balance == -1)
-		target = prealloc_rrl(root, target, old);
+		target = prealloc_rrl(ctxt, target);
 	else
-		target = prealloc_rol(root, target, old);
+		target = prealloc_rol(ctxt, target);
 
 	/* allocations inside these funcs may fail */
 	if (IS_ERR(target))
@@ -1037,7 +1040,7 @@ static struct sptree_node *prealloc_unwind_left(struct sptree_root *root, struct
 }
 
 /* target->balance == -1 */
-static struct sptree_node *prealloc_unwind_right(struct sptree_root *root, struct sptree_node *target, struct sptree_node **old)
+static struct sptree_node *prealloc_unwind_right(struct sptree_ctxt *ctxt, struct sptree_node *target)
 {
 	struct sptree_node *pivot = target->left;
 
@@ -1045,9 +1048,9 @@ static struct sptree_node *prealloc_unwind_right(struct sptree_root *root, struc
 	BUG_ON(!pivot);
 
 	if (pivot->balance == 1)
-		target = prealloc_rlr(root, target, old);
+		target = prealloc_rlr(ctxt, target);
 	else
-		target = prealloc_ror(root, target, old);
+		target = prealloc_ror(ctxt, target);
 
 	/* allocations inside these funcs may fail */
 	if (IS_ERR(target))
@@ -1061,7 +1064,7 @@ static struct sptree_node *prealloc_unwind_right(struct sptree_root *root, struc
 /* it takes the initial target node and bubbles it down to a leaf node -> which will later be deleted */
 /* will return NULL on error */
 /* WARNING: this function does not return the top of the breallocated branch, but the bottom */
-static struct sptree_node *_prealloc_unwind(struct sptree_root *root, struct sptree_node *target, struct sptree_node **old)
+static struct sptree_node *_prealloc_unwind(struct sptree_ctxt *ctxt, struct sptree_node *target)
 {
 	struct sptree_node *prealloc, *parent;
 
@@ -1076,8 +1079,8 @@ static struct sptree_node *_prealloc_unwind(struct sptree_root *root, struct spt
 	memcpy(prealloc, target, sizeof(*prealloc));
 	prealloc->new_branch = 1;
 
-	target->old = *old;						/* this node will be replaced */
-	*old = target;							/* add to chain of old nodes */
+	target->old = ctxt->old;					/* this node will be replaced */
+	ctxt->old = target;						/* add to chain of old nodes */
 
 	/* walk the new branch, add nodes that represent the bubbling sequence */
 	do {
@@ -1089,15 +1092,15 @@ static struct sptree_node *_prealloc_unwind(struct sptree_root *root, struct spt
 
 		switch (target->balance) {
 		case -1:
-			prealloc = prealloc_unwind_right(root, target, old);
+			prealloc = prealloc_unwind_right(ctxt, target);
 			break;
 
 		case 0:
-			prealloc = prealloc_unwind_double(root, target, old);
+			prealloc = prealloc_unwind_double(ctxt, target);
 			break;
 
 		case 1:
-			prealloc = prealloc_unwind_left(root, target, old);
+			prealloc = prealloc_unwind_left(ctxt, target);
 			break;
 
 		default:
@@ -1130,7 +1133,7 @@ int prealloc_unwind(struct sptree_root *root, unsigned long addr)
 {
 	struct sptree_node *target, *parent, **pbranch;
 	struct sptree_node *prealloc;
-	struct sptree_node *old = NULL;
+	struct sptree_ctxt ctxt;
 
 	if (!address_valid(root, addr))
 		return -EINVAL;
@@ -1143,7 +1146,9 @@ int prealloc_unwind(struct sptree_root *root, unsigned long addr)
 	if (is_leaf(target))
 		return 0;
 
-	prealloc = _prealloc_unwind(root, target, &old);
+	sptree_ctxt_init(&ctxt, root);
+
+	prealloc = _prealloc_unwind(&ctxt, target);
 	if (!prealloc)
 		return -ENOMEM;
 
@@ -1160,7 +1165,8 @@ int prealloc_unwind(struct sptree_root *root, unsigned long addr)
 	prealloc_connect(pbranch, prealloc);
 
 	// this will remove the replaced nodes
-	prealloc_remove_old(old);
+	if (ctxt.old)
+		prealloc_remove_old(ctxt.old);
 
 	// TODO: remove once code stable
 	validate_avl_balancing(root);
@@ -1182,7 +1188,7 @@ int prealloc_unwind(struct sptree_root *root, unsigned long addr)
  * Then a retrace must be done to propagate the diff in height.
  * Can not return NULL as a valid value.
  */
-static struct sptree_node *delete_retrace(struct sptree_root *root, struct sptree_node *leaf, struct sptree_node **old)
+static struct sptree_node *delete_retrace(struct sptree_ctxt *ctxt, struct sptree_node *leaf)
 {
 	struct sptree_node *parent = get_parent(leaf);
 	struct sptree_iterator iter;
@@ -1191,7 +1197,7 @@ static struct sptree_node *delete_retrace(struct sptree_root *root, struct sptre
 
 	/* node was already leaf, no unwinding happened */
 	if (!is_new_branch(parent)) {
-		parent = prealloc_parent(parent, old);
+		parent = prealloc_parent(ctxt, parent);
 		if (!parent)
 			return ERR_PTR(-ENOMEM);
 	}
@@ -1214,8 +1220,8 @@ static struct sptree_node *delete_retrace(struct sptree_root *root, struct sptre
 	/* nodes along this branch may be heavy towards the leaf or balanced
 	 * this also applies to its direct parent, if it's leaf-heavy,
 	 * deleting the leaf will propagate the change up the new branch */
-	prealloc_change_height(leaf, -1);
-	// TODO: this case was included in prealloc_change_height()
+	prealloc_propagate_change(ctxt, leaf, -1);
+	// TODO: this case was included in prealloc_propagate_change()
 	// https://en.wikipedia.org/wiki/AVL_tree#:~:text=The%20retracing%20can%20stop%20if%20the%20balance%20factor%20becomes%20%C2%B11%20(it%20must%20have%20been%200)%20meaning%20that%20the%20height%20of%20that%20subtree%20remains%20unchanged.
 	// but it will have to be implemented overall in the fix/retrace algorithm
 
@@ -1228,12 +1234,12 @@ static struct sptree_node *delete_retrace(struct sptree_root *root, struct sptre
 		switch (iter.node->balance) {
 		case -2:
 			ASSERT(iter.state = ITER_LEFT);
-			iter.node = prealloc_rlr(root, iter.node, old);
+			iter.node = prealloc_rlr(ctxt, iter.node);
 			break;
 
 		case 2:
 			ASSERT(iter.state = ITER_RIGHT);
-			iter.node = prealloc_rrl(root, iter.node, old);
+			iter.node = prealloc_rrl(ctxt, iter.node);
 			break;
 		}
 
@@ -1251,19 +1257,17 @@ static struct sptree_node *delete_retrace(struct sptree_root *root, struct sptre
 			iter.state = ITER_RIGHT;
 	}
 
+	pr_info("%s: overall diff after fix %d\n", __func__, ctxt->diff);
+
 	// TODO: rest of the retracing (parent contains the link point of the new branch)
 	// ...
-
-	// TODO: how do we realize if the subtree whose root is deleted loses height ???
-	// ...
-	// TODO: prealloc_change_height() can account for the overall change of height when the context will be created!!!
 
 	return iter.node;
 }
 
 /* delete & retrace in a single function */
 /* WARNING: can return NULL as a valid value (check corner case) */
-static struct sptree_node *unwind_delete_retrace(struct sptree_root *root, struct sptree_node *node, struct sptree_node **old)
+static struct sptree_node *unwind_delete_retrace(struct sptree_ctxt *ctxt, struct sptree_node *node)
 {
 	struct sptree_node *prealloc;
 	struct sptree_node *leaf;
@@ -1272,8 +1276,8 @@ static struct sptree_node *unwind_delete_retrace(struct sptree_root *root, struc
 	// (right now, height propagation is done only on the new branch)
 
 	if (is_leaf(node)) {
-		node->old = *old;						/* this node will be deleted */
-		*old = node;							/* add to chain of old nodes */
+		node->old = ctxt->old;						/* this node will be deleted */
+		ctxt->old = node;						/* add to chain of old nodes */
 
 		/* if that node is the only node in the tree, the new branch is empty (NULL) */
 		if (is_root(node->parent))
@@ -1283,7 +1287,7 @@ static struct sptree_node *unwind_delete_retrace(struct sptree_root *root, struc
 	}
 	else {
 		// bubble to bottom
-		prealloc = _prealloc_unwind(root, node, old);
+		prealloc = _prealloc_unwind(ctxt, node);
 		if (!prealloc)
 			return ERR_PTR(-ENOMEM);
 		leaf = prealloc;
@@ -1306,7 +1310,7 @@ static struct sptree_node *unwind_delete_retrace(struct sptree_root *root, struc
 	/* in the corner case of a leaf node being deleted, it is considered that the subtree represented
 	 * by that node decreseas in height, so retrace creates a branch starting with its parent */
 
-	prealloc = delete_retrace(root, leaf, old);
+	prealloc = delete_retrace(ctxt, leaf);
 	if (IS_ERR(prealloc))
 		return prealloc;
 
@@ -1327,7 +1331,7 @@ int prealloc_delete(struct sptree_root *root, unsigned long addr)
 {
 	struct sptree_node *target, *parent, **pbranch;
 	struct sptree_node *prealloc;
-	struct sptree_node *old = NULL;
+	struct sptree_ctxt ctxt;
 
 	if (!address_valid(root, addr))
 		return -EINVAL;
@@ -1339,8 +1343,10 @@ int prealloc_delete(struct sptree_root *root, unsigned long addr)
 	// parent may contain L/R flags or NULL
 	parent = target->parent;
 
+	sptree_ctxt_init(&ctxt, root);
+
 	/* may return NULL as a valid value */
-	prealloc = unwind_delete_retrace(root, target, &old);
+	prealloc = unwind_delete_retrace(&ctxt, target);
 	if (IS_ERR(prealloc))
 		return PTR_ERR(prealloc);
 
@@ -1352,7 +1358,8 @@ int prealloc_delete(struct sptree_root *root, unsigned long addr)
 	prealloc_connect(pbranch, prealloc);
 
 	// this will remove the replaced nodes
-	prealloc_remove_old(old);
+	if (ctxt.old)
+		prealloc_remove_old(ctxt.old);
 
 	// TODO: remove once code stable
 	validate_avl_balancing(root);
