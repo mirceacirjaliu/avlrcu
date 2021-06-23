@@ -17,7 +17,7 @@
 static void sptree_ctxt_init(struct sptree_ctxt *ctxt, struct sptree_root *root)
 {
 	ctxt->root = root;
-	ctxt->old = NULL;
+	init_llist_head(&ctxt->old);
 	ctxt->diff = 0;
 }
 
@@ -185,15 +185,15 @@ static void prealloc_connect(struct sptree_node **pbranch, struct sptree_node *b
  *
  * All nodes in the old chain will be passed to RCU for deletion.
  */
-static void prealloc_remove_old(struct sptree_node *old)
+static void prealloc_remove_old(struct sptree_ctxt *ctxt)
 {
-	struct sptree_node *temp;
+	struct llist_node *node;
+	struct sptree_node *old, *temp;
 
-	while (old) {
-		temp = old->old;
+	// TODO: use ctxt->root->ops->free_rcu() once ops are implemented
+	node = __llist_del_all(&ctxt->old);
+	llist_for_each_entry_safe(old, temp, node, old)
 		kfree_rcu(old, rcu);
-		old = temp;
-	}
 }
 
 
@@ -399,8 +399,7 @@ static struct sptree_node *prealloc_retrace(struct sptree_ctxt *ctxt, struct spt
 		memcpy(new_parent, parent, sizeof(*new_parent));
 		new_parent->new_branch = 1;
 
-		parent->old = ctxt->old;					/* this node will be replaced */
-		ctxt->old = parent;						/* add to chain of old nodes */
+		__llist_add(&parent->old, &ctxt->old);				/* add to chain of old nodes */
 
 		if (is_left_child(node->parent)) {
 			pr_info("%s: node "NODE_FMT" is left child of "NODE_FMT"\n", __func__,
@@ -531,8 +530,8 @@ int prealloc_insert(struct sptree_root *root, unsigned long addr)
 	prealloc_connect(pbranch, prealloc);
 
 	// this will remove the replaced nodes
-	if (ctxt.old)
-		prealloc_remove_old(ctxt.old);
+	if (!llist_empty(&ctxt.old))
+		prealloc_remove_old(&ctxt);
 
 	// TODO: remove once code stable
 	validate_avl_balancing(root);
@@ -652,8 +651,7 @@ static struct sptree_node *prealloc_parent(struct sptree_ctxt *ctxt, struct sptr
 	if (is_new_branch(parent->right))
 		parent->right->parent = make_right(new_parent);
 
-	parent->old = ctxt->old;					/* this node will be replaced */
-	ctxt->old = parent;						/* add to chain of old nodes */
+	__llist_add(&parent->old, &ctxt->old);				/* add to chain of old nodes */
 
 	return new_parent;
 }
@@ -687,8 +685,7 @@ static struct sptree_node *prealloc_child(struct sptree_ctxt *ctxt, struct sptre
 		new_child->parent = make_right(parent);			/* create links on the new branch */
 	}
 
-	child->old = ctxt->old;						/* this node will be replaced */
-	ctxt->old = child;						/* add to chain of old nodes */
+	__llist_add(&child->old, &ctxt->old);				/* add to chain of old nodes */
 
 	return new_child;
 }
@@ -1079,8 +1076,8 @@ static struct sptree_node *_prealloc_unwind(struct sptree_ctxt *ctxt, struct spt
 	memcpy(prealloc, target, sizeof(*prealloc));
 	prealloc->new_branch = 1;
 
-	target->old = ctxt->old;					/* this node will be replaced */
-	ctxt->old = target;						/* add to chain of old nodes */
+	__llist_add(&target->old, &ctxt->old);				/* add to chain of old nodes */
+
 
 	/* walk the new branch, add nodes that represent the bubbling sequence */
 	do {
@@ -1165,8 +1162,8 @@ int prealloc_unwind(struct sptree_root *root, unsigned long addr)
 	prealloc_connect(pbranch, prealloc);
 
 	// this will remove the replaced nodes
-	if (ctxt.old)
-		prealloc_remove_old(ctxt.old);
+	if (!llist_empty(&ctxt.old))
+		prealloc_remove_old(&ctxt);
 
 	// TODO: remove once code stable
 	validate_avl_balancing(root);
@@ -1276,8 +1273,7 @@ static struct sptree_node *unwind_delete_retrace(struct sptree_ctxt *ctxt, struc
 	// (right now, height propagation is done only on the new branch)
 
 	if (is_leaf(node)) {
-		node->old = ctxt->old;						/* this node will be deleted */
-		ctxt->old = node;						/* add to chain of old nodes */
+		__llist_add(&node->old, &ctxt->old);				/* add to chain of old nodes */
 
 		/* if that node is the only node in the tree, the new branch is empty (NULL) */
 		if (is_root(node->parent))
@@ -1358,8 +1354,8 @@ int prealloc_delete(struct sptree_root *root, unsigned long addr)
 	prealloc_connect(pbranch, prealloc);
 
 	// this will remove the replaced nodes
-	if (ctxt.old)
-		prealloc_remove_old(ctxt.old);
+	if (!llist_empty(&ctxt.old))
+		prealloc_remove_old(&ctxt);
 
 	// TODO: remove once code stable
 	validate_avl_balancing(root);

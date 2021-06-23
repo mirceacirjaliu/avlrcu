@@ -4,6 +4,7 @@
 
 #include <linux/types.h>
 #include <linux/rcupdate.h>
+#include <linux/llist.h>
 
 struct sptree_node {
 	unsigned long start;
@@ -17,7 +18,7 @@ struct sptree_node {
 
 		struct {
 			/* chain of old nodes to be deleted */
-			struct sptree_node *old;
+			struct llist_node old;
 
 			// TODO: in case of all levels balanced, a lot of reverse double rotations will be needed
 			// TODO: this will propagate a lot of unbalancing along the branch & this number may increase/decrease
@@ -38,7 +39,7 @@ struct sptree_root {
 /* context for insert/delete operations */
 struct sptree_ctxt {
 	struct sptree_root *root;
-	struct sptree_node *old;
+	struct llist_head old;
 	int diff;
 };
 
