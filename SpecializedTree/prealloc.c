@@ -1290,9 +1290,14 @@ static struct sptree_node *delete_retrace(struct sptree_ctxt *ctxt, struct sptre
 
 	ASSERT(ctxt->diff == -1);
 
-	// TODO: rest of the retracing (parent contains the link point of the new branch)
-	// TODO: work on the balance value of the parent before adding the diff
+	/* rest of the retracing (parent contains the link point of the new branch) */
+	// TODO: work on the balance value of the parent before adding the diff ?!
 	// TODO: consider the diff implicitly as -1, stop iteration by returning ?!
+	// TODO: yes, at this point the diff can be 0 or -1, so can be represented
+	//	 by 1 bit or by the control flow (iterate while -1, otherwise return)
+
+	// TODO: prealloc_parent() only if links change (rotation), otherwise balances can be modified on the old branch
+	// TODO: if I reach a point where I need a rotation, I must extend the new branch to my current point !
 
 	while (!is_root(parent)) {
 
@@ -1321,10 +1326,6 @@ static struct sptree_node *delete_retrace(struct sptree_ctxt *ctxt, struct sptre
 
 		// right subtree just lost height => left excessive balance
 		case -2:
-			// TODO: sibling is brought into the new branch in the rotate functions
-			//sibling = prealloc_child(ctxt, parent, LEFT_CHILD);
-			//if (!sibling)
-			//	goto error;
 			sibling = parent->left;
 
 			if (sibling->balance > 0)
@@ -1339,10 +1340,6 @@ static struct sptree_node *delete_retrace(struct sptree_ctxt *ctxt, struct sptre
 
 		// left subtree just lost height => right excessive balance
 		case +2:
-			// TODO: sibling is brought into the new branch in the rotate functions
-			//sibling = prealloc_child(ctxt, parent, RIGHT_CHILD);
-			//if (!sibling)
-			//	goto error;
 			sibling = parent->right;
 
 			if (sibling->balance < 0)
@@ -1381,11 +1378,11 @@ static struct sptree_node *unwind_delete_retrace(struct sptree_ctxt *ctxt, struc
 	struct sptree_node *parent;
 
 	if (is_leaf(node)) {
-		__llist_add(&node->old, &ctxt->old);			/* add to chain of old nodes */
-
 		/* if that node is the only node in the tree, the new branch is empty (NULL) */
-		if (is_root(node->parent))
+		if (is_root(node->parent)) {
+			__llist_add(&node->old, &ctxt->old);		/* add to chain of old nodes */
 			return NULL;
+		}
 
 		// TODO: this is stupid, but I need a temporary leaf replacement for the functions to work
 		leaf = prealloc_replace(ctxt, node);
