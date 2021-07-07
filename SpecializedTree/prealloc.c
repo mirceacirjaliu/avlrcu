@@ -1296,9 +1296,6 @@ static struct sptree_node *delete_retrace(struct sptree_ctxt *ctxt, struct sptre
 	// TODO: yes, at this point the diff can be 0 or -1, so can be represented
 	//	 by 1 bit or by the control flow (iterate while -1, otherwise return)
 
-	// TODO: prealloc_parent() only if links change (rotation), otherwise balances can be modified on the old branch
-	// TODO: if I reach a point where I need a rotation, I must extend the new branch to my current point !
-
 	while (!is_root(parent)) {
 
 		// bring parent to new branch
