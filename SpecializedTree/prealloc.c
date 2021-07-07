@@ -21,7 +21,7 @@ static void sptree_ctxt_init(struct sptree_ctxt *ctxt, struct sptree_root *root)
 	ctxt->diff = 0;
 }
 
-/**
+/*
  * _delete_prealloc() - delete prealloc branch/subtree in case of failure
  * @prealloc:		The root of the new branch
  *
@@ -35,8 +35,9 @@ static void _delete_prealloc(struct sptree_node *prealloc)
 	struct sptree_node *next;
 
 	pr_info("%s: start at "NODE_FMT"\n", __func__, NODE_ARG(prealloc));
-	BUG_ON(prealloc == NULL);
-	BUG_ON(!is_new_branch(prealloc));
+	ASSERT(prealloc);
+	ASSERT(is_new_branch(prealloc));
+	ASSERT(is_root(get_parent(prealloc)) || !is_new_branch(get_parent(prealloc)));
 
 	iter.node = prealloc;
 	iter.state = ITER_UP;
@@ -194,6 +195,30 @@ static void prealloc_remove_old(struct sptree_ctxt *ctxt)
 	node = __llist_del_all(&ctxt->old);
 	llist_for_each_entry_safe(old, temp, node, old)
 		kfree_rcu(old, rcu);
+}
+
+/*
+ * prealloc_replace() - replicates a node on the new branch
+ * @ctxt() - AVL operations environment
+ * @target - node to be replaced
+ *
+ * Returns a node on the new branch or NULL on error.
+ */
+static struct sptree_node *prealloc_replace(struct sptree_ctxt *ctxt, struct sptree_node *target)
+{
+	struct sptree_node *prealloc;
+
+	/* start by allocating a node that replaces target */
+	prealloc = kzalloc(sizeof(*prealloc), GFP_ATOMIC);
+	if (!prealloc)
+		return NULL;
+
+	memcpy(prealloc, target, sizeof(*prealloc));
+	prealloc->new_branch = 1;
+
+	__llist_add(&target->old, &ctxt->old);				/* add to chain of old nodes */
+
+	return prealloc;
 }
 
 
@@ -386,20 +411,17 @@ static struct sptree_node *prealloc_retrace(struct sptree_ctxt *ctxt, struct spt
 
 	/* node is the latest member of branch */
 	pr_info("%s: starting at "NODE_FMT"\n", __func__, NODE_ARG(node));
+	ASSERT(is_new_branch(node));
 
-	for (parent = strip_flags(node->parent); parent != NULL; node = parent, parent = strip_flags(node->parent)) {
+	for (parent = get_parent(node); !is_root(parent); node = parent, parent = get_parent(node)) {
 
 		pr_info("%s: loop on parent "NODE_FMT", node is "NODE_FMT"\n",
 			__func__, NODE_ARG(parent), NODE_ARG(node));
 
-		new_parent = kzalloc(sizeof(*new_parent), GFP_ATOMIC);
+		/* bring parent to new branch */
+		new_parent = prealloc_replace(ctxt, parent);
 		if (!new_parent)
 			goto error;
-
-		memcpy(new_parent, parent, sizeof(*new_parent));
-		new_parent->new_branch = 1;
-
-		__llist_add(&parent->old, &ctxt->old);				/* add to chain of old nodes */
 
 		if (is_left_child(node->parent)) {
 			pr_info("%s: node "NODE_FMT" is left child of "NODE_FMT"\n", __func__,
@@ -477,6 +499,7 @@ static struct sptree_node *prealloc_retrace(struct sptree_ctxt *ctxt, struct spt
 	return branch;
 
 error:
+	// branch should have the top of the new branch
 	_delete_prealloc(branch);
 
 	return NULL;
@@ -645,12 +668,10 @@ static struct sptree_node *prealloc_parent(struct sptree_ctxt *ctxt, struct sptr
 	ASSERT(is_new_branch(child));
 	ASSERT(!is_new_branch(parent));
 
-	new_parent = kzalloc(sizeof(*new_parent), GFP_ATOMIC);
+	/* bring the parent to the new branch */
+	new_parent = prealloc_replace(ctxt, parent);
 	if (!new_parent)
-		return NULL;						/* only error output */
-
-	memcpy(new_parent, parent, sizeof(*new_parent));
-	new_parent->new_branch = 1;
+		return NULL;
 
 	/* link on the new branch */
 	if (is_left_child(child->parent)) {
@@ -661,8 +682,6 @@ static struct sptree_node *prealloc_parent(struct sptree_ctxt *ctxt, struct sptr
 		new_parent->right = child;
 		child->parent = make_right(new_parent);
 	}
-
-	__llist_add(&parent->old, &ctxt->old);				/* add to chain of old nodes */
 
 	return new_parent;
 }
@@ -685,23 +704,20 @@ static struct sptree_node *prealloc_child(struct sptree_ctxt *ctxt, struct sptre
 	ASSERT(is_new_branch(parent));
 	ASSERT(child && !is_new_branch(child));
 
-	new_child = kzalloc(sizeof(*new_child), GFP_ATOMIC);
+	/* bring the child to the new branch */
+	new_child = prealloc_replace(ctxt, child);
 	if (!new_child)
-		return NULL;						/* only error output */
+		return NULL;
 
-	memcpy(new_child, child, sizeof(*new_child));			/* copy pivot */
-	new_child->new_branch = 1;
-
+	/* link on the new branch */
 	if (which == LEFT_CHILD) {
 		parent->left = new_child;
-		new_child->parent = make_left(parent);			/* create links on the new branch */
+		new_child->parent = make_left(parent);
 	}
 	else {
 		parent->right = new_child;
-		new_child->parent = make_right(parent);			/* create links on the new branch */
+		new_child->parent = make_right(parent);
 	}
-
-	__llist_add(&child->old, &ctxt->old);				/* add to chain of old nodes */
 
 	return new_child;
 }
@@ -1080,30 +1096,6 @@ static struct sptree_node *prealloc_unwind_right(struct sptree_ctxt *ctxt, struc
 
 	/* rotation functions return the new subtree root */
 	return target->right;
-}
-
-/*
- * prealloc_replace() - replicates a node on the new branch
- * @ctxt() - AVL operations context
- * @target - node to be replaced
- *
- * Returns a node on the new branch or NULL on error.
- */
-static struct sptree_node *prealloc_replace(struct sptree_ctxt *ctxt, struct sptree_node *target)
-{
-	struct sptree_node *prealloc;
-
-	/* start by allocating a node that replaces target */
-	prealloc = kzalloc(sizeof(*prealloc), GFP_ATOMIC);
-	if (!prealloc)
-		return NULL;
-
-	memcpy(prealloc, target, sizeof(*prealloc));
-	prealloc->new_branch = 1;
-
-	__llist_add(&target->old, &ctxt->old);				/* add to chain of old nodes */
-
-	return prealloc;
 }
 
 /*
