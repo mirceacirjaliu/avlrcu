@@ -221,6 +221,41 @@ static struct sptree_node *prealloc_replace(struct sptree_ctxt *ctxt, struct spt
 	return prealloc;
 }
 
+/*
+ * prealloc_parent() - brings a parent to the new branch
+ * @ctxt - AVL operation environment
+ * @child - child already on the new branch
+ *
+ * Brings a parent to the new branch (one of the children is already on the new branch).
+ * Useful for retrace where the algorithm ascends.
+ */
+static struct sptree_node *prealloc_parent(struct sptree_ctxt *ctxt, struct sptree_node *child)
+{
+	struct sptree_node *parent = get_parent(child);
+	struct sptree_node *new_parent;
+
+	pr_info("%s: at "NODE_FMT"\n", __func__, NODE_ARG(parent));
+	ASSERT(is_new_branch(child));
+	ASSERT(!is_new_branch(parent));
+
+	/* bring the parent to the new branch */
+	new_parent = prealloc_replace(ctxt, parent);
+	if (!new_parent)
+		return NULL;
+
+	/* link on the new branch */
+	if (is_left_child(child->parent)) {
+		new_parent->left = child;
+		child->parent = make_left(new_parent);
+	}
+	else {
+		new_parent->right = child;
+		child->parent = make_right(new_parent);
+	}
+
+	return new_parent;
+}
+
 
 
 /* return new root to be set as top of branch */
@@ -412,6 +447,8 @@ static struct sptree_node *prealloc_retrace(struct sptree_ctxt *ctxt, struct spt
 	/* node is the latest member of branch */
 	pr_info("%s: starting at "NODE_FMT"\n", __func__, NODE_ARG(node));
 	ASSERT(is_new_branch(node));
+
+	// TODO: prealloc_parent() in this loop & reuse the parent variable
 
 	for (parent = get_parent(node); !is_root(parent); node = parent, parent = get_parent(node)) {
 
@@ -649,41 +686,6 @@ static struct balance_factors ror_new_balance(int root_bal, int pivot_bal)
 	}
 
 	return new_balance;
-}
-
-/*
- * prealloc_parent() - brings a parent to the new branch
- * @ctxt - AVL operation environment
- * @child - child already on the new branch
- *
- * Brings a parent to the new branch (one of the children is already on the new branch).
- * Useful for retrace where the algorithm ascends.
- */
-static struct sptree_node *prealloc_parent(struct sptree_ctxt *ctxt, struct sptree_node *child)
-{
-	struct sptree_node *parent = get_parent(child);
-	struct sptree_node *new_parent;
-
-	pr_info("%s: at "NODE_FMT"\n", __func__, NODE_ARG(parent));
-	ASSERT(is_new_branch(child));
-	ASSERT(!is_new_branch(parent));
-
-	/* bring the parent to the new branch */
-	new_parent = prealloc_replace(ctxt, parent);
-	if (!new_parent)
-		return NULL;
-
-	/* link on the new branch */
-	if (is_left_child(child->parent)) {
-		new_parent->left = child;
-		child->parent = make_left(new_parent);
-	}
-	else {
-		new_parent->right = child;
-		child->parent = make_right(new_parent);
-	}
-
-	return new_parent;
 }
 
 /*
@@ -1246,6 +1248,7 @@ int prealloc_unwind(struct sptree_root *root, unsigned long addr)
 static struct sptree_node *delete_retrace(struct sptree_ctxt *ctxt, struct sptree_node *parent)
 {
 	struct sptree_node *node, *temp, *sibling;
+	int sibling_balance_before;
 
 	pr_info("%s: starting at "NODE_FMT"\n", __func__, NODE_ARG(parent));
 	ASSERT(is_new_branch(parent));
@@ -1282,72 +1285,70 @@ static struct sptree_node *delete_retrace(struct sptree_ctxt *ctxt, struct sptre
 
 	ASSERT(ctxt->diff == -1);
 
-	/* rest of the retracing (parent contains the link point of the new branch) */
-	// TODO: work on the balance value of the parent before adding the diff ?!
-	// TODO: consider the diff implicitly as -1, stop iteration by returning ?!
-	// TODO: yes, at this point the diff can be 0 or -1, so can be represented
-	//	 by 1 bit or by the control flow (iterate while -1, otherwise return)
+	/* rest of the retracing (parent already contains the link point of the new branch) */
+	/* integrate diff == -1 condition into the control flow,
+	 * loop as long as there is a decrease in height present */
+	for (; !is_root(parent); node = parent, parent = get_parent(node)) {
 
-	while (!is_root(parent)) {
+		pr_info("%s: loop on parent "NODE_FMT", node is "NODE_FMT"\n",
+			__func__, NODE_ARG(parent), NODE_ARG(node));
 
-		// bring parent to new branch
+		/* bring parent to new branch */
 		parent = prealloc_parent(ctxt, node);
 		if (!parent)
 			goto error;
 
-		// add the diff in height to the parent
-		if (is_left_child(node->parent))
-			parent->balance += 1;
-		else
-			parent->balance -= 1;
-		ctxt->diff = 0;
+		if (is_left_child(node->parent)) {
+			if (parent->balance > 0) {
+				/* bring sibling to new branch */
+				sibling = prealloc_child(ctxt, parent, RIGHT_CHILD);
+				if (!sibling)
+					goto error;
 
-		switch (parent->balance) {
-		// parent was unbalanced towards the subtree & just became balanced => decrease in height
-		case 0:
-			ctxt->diff = -1;
-			break;
+				sibling_balance_before = sibling->balance;
+				if (sibling->balance < 0)
+					parent = prealloc_retrace_rlr(parent);
+				else
+					parent = prealloc_retrace_rol(parent);
+			}
+			else if (parent->balance == 0) {
+				parent->balance = 1;
+				return parent;
+			}
+			else	// parent->balance == -1
+			{
+				parent->balance = 0;
+				continue;
+			}
+		}
+		else	// is right child
+		{
+			if (parent->balance < 0) {
+				/* bring sibling to new branch */
+				sibling = prealloc_child(ctxt, parent, LEFT_CHILD);
+				if (!sibling)
+					goto error;
 
-		// parent was balanced & the subtree decreased in height => absorb change
-		case -1:
-		case +1:
-			return parent;
-
-		// right subtree just lost height => left excessive balance
-		case -2:
-			sibling = parent->left;
-
-			if (sibling->balance > 0)
-				parent = prealloc_rlr(ctxt, parent);
-			else
-				parent = prealloc_ror(ctxt, parent);
-
-			if (!parent)
-				goto error;
-
-			break;
-
-		// left subtree just lost height => right excessive balance
-		case +2:
-			sibling = parent->right;
-
-			if (sibling->balance < 0)
-				parent = prealloc_rrl(ctxt, parent);
-			else
-				parent = prealloc_rol(ctxt, parent);
-
-			if (!parent)
-				goto error;
-
-			break;
+				sibling_balance_before = sibling->balance;
+				if (sibling->balance > 0)
+					parent = prealloc_retrace_rlr(parent);
+				else
+					parent = prealloc_retrace_ror(parent);
+			}
+			else if (parent->balance == 0) {
+				parent->balance = -1;
+				return parent;
+			}
+			else	// parent->balance == 1
+			{
+				parent->balance = 0;
+				continue;
+			}
 		}
 
-		// stop iteration if height diff was solved
-		if (ctxt->diff == 0)
+		// only reachable from sibling-related branch
+		if (sibling_balance_before == 0)
 			return parent;
-
-		node = parent;
-		parent = get_parent(node);
 	}
 
 	return node;
