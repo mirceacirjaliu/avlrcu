@@ -441,103 +441,72 @@ static struct sptree_node *prealloc_retrace_rrl(struct sptree_node *root)
 static struct sptree_node *prealloc_retrace(struct sptree_ctxt *ctxt, struct sptree_node *node)
 {
 	struct sptree_node *parent;
-	struct sptree_node *branch = node;
-	struct sptree_node *new_parent = NULL;
 
 	/* node is the latest member of branch */
 	pr_info("%s: starting at "NODE_FMT"\n", __func__, NODE_ARG(node));
 	ASSERT(is_new_branch(node));
-
-	// TODO: prealloc_parent() in this loop & reuse the parent variable
 
 	for (parent = get_parent(node); !is_root(parent); node = parent, parent = get_parent(node)) {
 
 		pr_info("%s: loop on parent "NODE_FMT", node is "NODE_FMT"\n",
 			__func__, NODE_ARG(parent), NODE_ARG(node));
 
-		/* bring parent to new branch */
-		new_parent = prealloc_replace(ctxt, parent);
-		if (!new_parent)
+		parent = prealloc_parent(ctxt, node);
+		if (!parent)
 			goto error;
 
 		if (is_left_child(node->parent)) {
-			pr_info("%s: node "NODE_FMT" is left child of "NODE_FMT"\n", __func__,
-				NODE_ARG(node), NODE_ARG(parent));
-
-			/* link top of branch to new parent */
-			new_parent->left = branch;
-			branch->parent = make_left(new_parent);
-
 			// parent is left-heavy
 			if (parent->balance < 0) {
 				// node is right-heavy
-				if (branch->balance > 0)
-					branch = prealloc_retrace_rlr(new_parent);
+				if (node->balance > 0)
+					parent = prealloc_retrace_rlr(parent);
 				else
-					branch = prealloc_retrace_ror(new_parent);
-				break;
+					parent = prealloc_retrace_ror(parent);
+
+				return parent;
 			}
 			// parent is right-heavy
 			else if (parent->balance > 0) {
-				new_parent->balance = 0;			/* parent becomes balanced */
-				branch = new_parent;				/* push parent to branch */
+				parent->balance = 0;			/* parent becomes balanced */
 
-				pr_info("%s: parent "NODE_FMT" becomes balanced, stop\n",
-					__func__, NODE_ARG(parent));
-				break;
+				return parent;
 			}
 			// parent is balanced
 			else {
-				new_parent->balance = -1;			/* parent becomes left-heavy */
-				branch = new_parent;				/* push parent to branch */
-
-				pr_info("%s: parent "NODE_FMT" becomes left-heavy, continue\n",
-					__func__, NODE_ARG(parent));
+				parent->balance = -1;			/* parent becomes left-heavy */
 			}
 		}
 		// is right child
 		else {
-			pr_info("%s: node "NODE_FMT" is right child of "NODE_FMT"\n", __func__,
-				NODE_ARG(node), NODE_ARG(parent));
-
-			/* link top of branch to new parent */
-			new_parent->right = branch;
-			branch->parent = make_right(new_parent);
-
 			// parent is right heavy
 			if (parent->balance > 0) {
 				// node is left-heavy
-				if (branch->balance < 0)
-					branch = prealloc_retrace_rrl(new_parent);
+				if (node->balance < 0)
+					parent = prealloc_retrace_rrl(parent);
 				else
-					branch = prealloc_retrace_rol(new_parent);
-				break;
+					parent = prealloc_retrace_rol(parent);
+
+				return parent;
 			}
 			// parent is left-heavy
 			else if (parent->balance < 0) {
-				new_parent->balance = 0;			/* parent becomes balanced */
-				branch = new_parent;				/* push parent to branch */
+				parent->balance = 0;			/* parent becomes balanced */
 
-				pr_info("%s: parent "NODE_FMT" becomes balanced, stop\n",
-					__func__, NODE_ARG(parent));
-				break;
+				return parent;
 			}
 			// parent is balanced
 			else {
-				new_parent->balance = 1;			/* parent becomes right-heavy */
-				branch = new_parent;				/* push parent to branch */
-
-				pr_info("%s: parent "NODE_FMT" becomes right-heavy, continue\n",
-					__func__, NODE_ARG(parent));
+				parent->balance = 1;			/* parent becomes right-heavy */
 			}
 		}
 	}
 
-	return branch;
+	return node;
 
 error:
-	// branch should have the top of the new branch
-	_delete_prealloc(branch);
+	// node should have the top of the new branch
+	_delete_prealloc(node);
 
 	return NULL;
 };
@@ -1300,12 +1269,9 @@ static struct sptree_node *delete_retrace(struct sptree_ctxt *ctxt, struct sptre
 
 		if (is_left_child(node->parent)) {
 			if (parent->balance > 0) {
-				/* bring sibling to new branch */
-				sibling = prealloc_child(ctxt, parent, RIGHT_CHILD);
-				if (!sibling)
-					goto error;
-
+				sibling = parent->right;
 				sibling_balance_before = sibling->balance;
+
 				if (sibling->balance < 0)
 					parent = prealloc_retrace_rlr(parent);
 				else
@@ -1315,21 +1281,18 @@ static struct sptree_node *delete_retrace(struct sptree_ctxt *ctxt, struct sptre
 				parent->balance = 1;
 				return parent;
 			}
-			else	// parent->balance == -1
-			{
+			// parent->balance == -1
+			else {
 				parent->balance = 0;
 				continue;
 			}
 		}
-		else	// is right child
-		{
+		// is right child
+		else {
 			if (parent->balance < 0) {
-				/* bring sibling to new branch */
-				sibling = prealloc_child(ctxt, parent, LEFT_CHILD);
-				if (!sibling)
-					goto error;
-
+				sibling = parent->left;
 				sibling_balance_before = sibling->balance;
+
 				if (sibling->balance > 0)
 					parent = prealloc_retrace_rlr(parent);
 				else
@@ -1339,8 +1302,8 @@ static struct sptree_node *delete_retrace(struct sptree_ctxt *ctxt, struct sptre
 				parent->balance = -1;
 				return parent;
 			}
-			else	// parent->balance == 1
-			{
+			// parent->balance == 1
+			else {
 				parent->balance = 0;
 				continue;
 			}
