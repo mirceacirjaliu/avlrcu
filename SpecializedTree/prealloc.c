@@ -1035,10 +1035,7 @@ static struct sptree_node *prealloc_unwind_left(struct sptree_ctxt *ctxt, struct
 	pr_info("%s: at "NODE_FMT"\n", __func__, NODE_ARG(target));
 	BUG_ON(!pivot);
 
-	if (pivot->balance == -1)
-		target = prealloc_rrl(ctxt, target);
-	else
-		target = prealloc_rol(ctxt, target);
+	target = prealloc_rol(ctxt, target);
 
 	/* allocations inside these funcs may fail */
 	if (!target)
@@ -1056,10 +1053,7 @@ static struct sptree_node *prealloc_unwind_right(struct sptree_ctxt *ctxt, struc
 	pr_info("%s: at "NODE_FMT"\n", __func__, NODE_ARG(target));
 	BUG_ON(!pivot);
 
-	if (pivot->balance == 1)
-		target = prealloc_rlr(ctxt, target);
-	else
-		target = prealloc_ror(ctxt, target);
+	target = prealloc_ror(ctxt, target);
 
 	/* allocations inside these funcs may fail */
 	if (!target)
@@ -1141,6 +1135,9 @@ static struct sptree_node *_prealloc_unwind(struct sptree_ctxt *ctxt, struct spt
 		/* check if the allocation succeeded */
 		if (!prealloc)
 			goto error;
+
+		/* check that the new pivot (prealloc) is AVL invariant */
+		ASSERT(prealloc->balance >= -1 && prealloc->balance <= 1);
 
 	} while (!is_leaf(prealloc));
 
