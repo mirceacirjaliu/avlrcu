@@ -208,6 +208,9 @@ static struct sptree_node *prealloc_replace(struct sptree_ctxt *ctxt, struct spt
 {
 	struct sptree_node *prealloc;
 
+	pr_info("%s: at "NODE_FMT"\n", __func__, NODE_ARG(target));
+	ASSERT(!is_new_branch(target));
+
 	/* start by allocating a node that replaces target */
 	prealloc = kzalloc(sizeof(*prealloc), GFP_ATOMIC);
 	if (!prealloc)
