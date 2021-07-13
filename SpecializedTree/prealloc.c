@@ -912,10 +912,145 @@ static struct sptree_node *prealloc_rlr(struct sptree_ctxt *ctxt, struct sptree_
 }
 
 
+/*
+ * poor_balance_depth() - count the number of moves needed to rebalance a poorly balanced subtree
+ * @target - first poorly balanced node (root of the subtree)
+ *
+ * A poorly balanced subtree can be recursive. A single rebalance will not be enough.
+ * This function counts the number of recursive rebalances needed to rebalance this subtree.
+ */
+static int poor_balance_depth(struct sptree_node *target)
+{
+	struct sptree_iterator iter;
+	int count = 0;
 
+	pr_info("%s: at "NODE_FMT"\n", __func__, NODE_ARG(target));
+	ASSERT(target->balance == -1 || target->balance == 1);
+	ASSERT(!is_leaf(target));	// kinda useless assert
 
+	iter.node = target;
+	iter.state = target->balance == -1 ? ITER_RIGHT : ITER_LEFT;
 
+	while (!is_leaf(iter.node)) {
+		/* check condition */
+		if ((iter.state == ITER_LEFT && iter.node->balance == 1) ||
+			(iter.state == ITER_RIGHT && iter.node->balance == -1))
+			count++;
+		else
+			break;
 
+		/* go down the branch */
+		if (iter.state == ITER_LEFT) {
+			iter.state = ITER_RIGHT;
+			iter.node = iter.node->right;
+		}
+		else {
+			iter.state = ITER_LEFT;
+			iter.node = iter.node->left;
+		}
+	}
+
+	return count;
+}
+
+/*
+ * prealloc_rebalance() - recursively rebalance a poorly balanced subtree
+ * @ctxt - AVL operations environment
+ * @target - root of the poorly balanced subtree
+ *
+ * A poorly balanced subtree can be recursive. A single rebalance will not be enough.
+ * This function will recursvely rebalance the poorly balanced branch.
+ * This subtree will not increase in height (according to rotation tables).
+ * Returns the new root of the subtree or NULL on error.
+ */
+static struct sptree_node *prealloc_rebalance(struct sptree_ctxt *ctxt, struct sptree_node *target)
+{
+	struct sptree_iterator iter;
+	struct sptree_node *child;
+	bool stop = false;
+
+	pr_info("%s: at "NODE_FMT"\n", __func__, NODE_ARG(target));
+	ASSERT(is_new_branch(target));
+	ASSERT(target->balance == -1 || target->balance == 1);
+
+	iter.node = target;
+	iter.state = (target->balance == 1) ? ITER_LEFT : ITER_RIGHT;
+
+	/* descend along poorly balanced branch */
+	while (true) {
+		if (iter.state == ITER_LEFT && iter.node->balance == 1) {
+			/* prealloc child anyway, it's either used for rotation or poorly balanced */
+			child = prealloc_child(ctxt, iter.node, RIGHT_CHILD);
+			if (!child)
+				return NULL;
+
+			/* still a poorly balanced child ? */
+			if (child->balance == -1) {
+				iter.node = child;
+				iter.state = ITER_RIGHT;
+				continue;	/* next poorly balanced node */
+			}
+			else
+				break;		/* bottom poorly balanced node */
+		}
+
+		if (iter.state == ITER_RIGHT && iter.node->balance == -1) {
+			/* prealloc child anyway, it's either used for rotation or poorly balanced */
+			child = prealloc_child(ctxt, iter.node, LEFT_CHILD);
+			if (!child)
+				return NULL;
+
+			/* still a poorly balanced child ? */
+			if (child->balance == 1) {
+				iter.node = child;
+				iter.state = ITER_LEFT;
+				continue;	/* next poorly balanced node */
+			}
+			else
+				break;		/* bottom poorly balanced node */
+		}
+
+		/* shouldn't reach this place */
+		pr_err("%s: invalid case at "NODE_FMT"\n", __func__, NODE_ARG(iter.node));
+		BUG();
+	}
+
+	/* we are at the bottom poorly balanced node */
+	ASSERT(is_new_branch(iter.node));
+
+	/* ascend & rebalance the tree */
+	do {
+		if (iter.node == target)
+			stop = true;
+
+		if (iter.state == ITER_LEFT) {
+			ASSERT(iter.node->balance == 1);
+
+			iter.node = prealloc_rol(ctxt, iter.node);
+			if (!iter.node)
+				return NULL;
+
+			if (!stop) {
+				iter.node = get_parent(iter.node);
+				iter.state = ITER_RIGHT;
+			}
+		}
+		else {
+			ASSERT(iter.node->balance == -1);
+
+			iter.node = prealloc_ror(ctxt, iter.node);
+			if (!iter.node)
+				return NULL;
+
+			if (!stop) {
+				iter.node = get_parent(iter.node);
+				iter.state = ITER_LEFT;
+			}
+		}
+	} while (!stop);
+
+	return iter.node;
+}
 
 static struct sptree_node *prealloc_reverse_rrl(struct sptree_ctxt *ctxt, struct sptree_node *target)
 {
@@ -963,10 +1098,11 @@ static struct sptree_node *prealloc_unwind_double(struct sptree_ctxt *ctxt, stru
 {
 	struct sptree_node *left = target->left;
 	struct sptree_node *right = target->right;
-	struct sptree_node *temp;
+	int poor_left, poor_right;
 
 	pr_info("%s: at "NODE_FMT"\n", __func__, NODE_ARG(target));
 	ASSERT(!is_leaf(target));
+	ASSERT(is_new_branch(target));
 
 	/* prealloc the left and right pivots,
 	 * both will be used in reverse compound rotations */
@@ -993,32 +1129,36 @@ static struct sptree_node *prealloc_unwind_double(struct sptree_ctxt *ctxt, stru
 	if (right->balance == 0 && left->balance == 0)
 		return prealloc_reverse_rrl(ctxt, target);
 
-	// both poorly balanced: rebalance one of them
-	if (right->balance == -1 && left->balance == 1) {
-		// rebalance the right subtree, then apply case 2
-		temp = prealloc_ror(ctxt, right);
-		if (!temp)
-			return NULL;
-		return prealloc_reverse_rlr(ctxt, target);
-	}
-
-	// rebalance left
+	// poorly balanced case, rebalance left
 	if (right->balance == 0 && left->balance == 1) {
+rebalance_left:
 		// rebalance the left subtree, then apply case 1
-		temp = prealloc_rol(ctxt, left);
-		if (!temp)
+		left = prealloc_rebalance(ctxt, left);
+		if (!left)
 			return NULL;
 		return prealloc_reverse_rrl(ctxt, target);
 	}
 
-	// rebalance right
+	// poorly balanced case, rebalance right
 	if (right->balance == -1 && left->balance == 0) {
+rebalance_right:
 		// rebalance the right subtree, then apply case 2
-		temp = prealloc_ror(ctxt, right);
-		if (!temp)
+		right = prealloc_rebalance(ctxt, right);
+		if (!right)
 			return NULL;
 		return prealloc_reverse_rlr(ctxt, target);
-	} // TODO: this is the same case as "both poorly balanced", merge
+	}
+
+	// both poorly balanced: rebalance the one with the least depth
+	if (right->balance == -1 && left->balance == 1) {
+		poor_left = poor_balance_depth(left);
+		poor_right = poor_balance_depth(right);
+
+		if (poor_left < poor_right)
+			goto rebalance_left;
+		else
+			goto rebalance_right;
+	}
 
 	/* did I miss something ? */
 	pr_err("%s: invalid case at "NODE_FMT", left "NODE_FMT", right "NODE_FMT"\n",
@@ -1033,11 +1173,20 @@ static struct sptree_node *prealloc_unwind_left(struct sptree_ctxt *ctxt, struct
 	struct sptree_node *pivot = target->right;
 
 	pr_info("%s: at "NODE_FMT"\n", __func__, NODE_ARG(target));
-	BUG_ON(!pivot);
+	ASSERT(pivot);
+
+	/* poorly balanced case, rebalance the subtree rooted by pivot */
+	if (pivot->balance == -1) {
+		pivot = prealloc_child(ctxt, target, RIGHT_CHILD);
+		if (!pivot)
+			return NULL;
+
+		pivot = prealloc_rebalance(ctxt, pivot);
+		if (!pivot)
+			return NULL;
+	}
 
 	target = prealloc_rol(ctxt, target);
-
-	/* allocations inside these funcs may fail */
 	if (!target)
 		return NULL;
 
@@ -1051,11 +1200,20 @@ static struct sptree_node *prealloc_unwind_right(struct sptree_ctxt *ctxt, struc
 	struct sptree_node *pivot = target->left;
 
 	pr_info("%s: at "NODE_FMT"\n", __func__, NODE_ARG(target));
-	BUG_ON(!pivot);
+	ASSERT(pivot);
+
+	/* poorly balanced case, rebalance the subtree rooted by pivot */
+	if (pivot->balance == 1) {
+		pivot = prealloc_child(ctxt, target, LEFT_CHILD);
+		if (!pivot)
+			return NULL;
+
+		pivot = prealloc_rebalance(ctxt, pivot);
+		if (!pivot)
+			return NULL;
+	}
 
 	target = prealloc_ror(ctxt, target);
-
-	/* allocations inside these funcs may fail */
 	if (!target)
 		return NULL;
 
