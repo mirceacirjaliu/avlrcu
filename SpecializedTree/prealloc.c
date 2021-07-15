@@ -674,7 +674,8 @@ static struct sptree_node *prealloc_child(struct sptree_ctxt *ctxt, struct sptre
 	struct sptree_node *child = which == LEFT_CHILD ? parent->left : parent->right;
 	struct sptree_node *new_child;
 
-	pr_info("%s: at "NODE_FMT"\n", __func__, NODE_ARG(parent));
+	pr_info("%s: %s child of "NODE_FMT"\n", __func__,
+		(which == LEFT_CHILD) ? "left" : "right", NODE_ARG(parent));
 	ASSERT(is_new_branch(parent));
 	ASSERT(child && !is_new_branch(child));
 
@@ -1341,6 +1342,8 @@ int prealloc_unwind(struct sptree_root *root, unsigned long addr)
 
 	// the unwind function returns the bottom of the preallocated branch
 	prealloc = prealloc_top(prealloc);
+
+	pr_info("%s: overall increase in height %d\n", __func__, ctxt.diff);
 
 	// parent may contain L/R flags or NULL
 	parent = prealloc->parent;
