@@ -426,8 +426,8 @@ static int dump_gv_show(struct seq_file *s, void *v)
 	left = node->left;
 	right = node->right;
 
-	seq_printf(s, "\tn%lx [label=\"%lx\\n%d\", style=filled, fillcolor=%s]\n",
-		(unsigned long)node, node->start, node->balance, "green");
+	seq_printf(s, "\tn%lx [label=\"%lx\\n%ld\", style=filled, fillcolor=%s]\n",
+		(unsigned long)node, node->start, (long)node->balance, "green");
 
 	if (left)
 		seq_printf(s, "\tn%lx -> n%lx [tailport=w]\n",

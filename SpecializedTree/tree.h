@@ -17,14 +17,9 @@ struct sptree_node {
 		struct rcu_head rcu;
 
 		struct {
-			/* chain of old nodes to be deleted */
-			struct llist_node old;
-
-			// TODO: in case of all levels balanced, a lot of reverse double rotations will be needed
-			// TODO: this will propagate a lot of unbalancing along the branch & this number may increase/decrease
-			// TODO: must find a way not to overflow this variable
-			int balance : 15;
-			int new_branch : 1;
+			struct llist_node old;		/* chain of old nodes to be deleted */
+			long balance : 63;		/* balance of current node */
+			unsigned long new_branch : 1;	/* nodes on the preallocated subtree */
 		};
 	};
 };
