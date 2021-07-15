@@ -1107,7 +1107,7 @@ static struct sptree_node *prealloc_unwind_double(struct sptree_ctxt *ctxt, stru
 	ASSERT(!is_leaf(target));
 	ASSERT(is_new_branch(target));
 
-	/* prealloc the left and right pivots,
+	/* prealloc both the left and right pivots,
 	 * both will be used in reverse compound rotations */
 	left = prealloc_child(ctxt, target, LEFT_CHILD);
 	if (!left)
@@ -1178,12 +1178,13 @@ static struct sptree_node *prealloc_unwind_left(struct sptree_ctxt *ctxt, struct
 	pr_info("%s: at "NODE_FMT"\n", __func__, NODE_ARG(target));
 	ASSERT(pivot);
 
+	/* prealloc child anyway, it's either used for rotation or poorly balanced */
+	pivot = prealloc_child(ctxt, target, RIGHT_CHILD);
+	if (!pivot)
+		return NULL;
+
 	/* poorly balanced case, rebalance the subtree rooted by pivot */
 	if (pivot->balance == -1) {
-		pivot = prealloc_child(ctxt, target, RIGHT_CHILD);
-		if (!pivot)
-			return NULL;
-
 		pivot = prealloc_rebalance(ctxt, pivot);
 		if (!pivot)
 			return NULL;
@@ -1205,12 +1206,13 @@ static struct sptree_node *prealloc_unwind_right(struct sptree_ctxt *ctxt, struc
 	pr_info("%s: at "NODE_FMT"\n", __func__, NODE_ARG(target));
 	ASSERT(pivot);
 
+	/* prealloc child anyway, it's either used for rotation or poorly balanced */
+	pivot = prealloc_child(ctxt, target, LEFT_CHILD);
+	if (!pivot)
+		return NULL;
+
 	/* poorly balanced case, rebalance the subtree rooted by pivot */
 	if (pivot->balance == 1) {
-		pivot = prealloc_child(ctxt, target, LEFT_CHILD);
-		if (!pivot)
-			return NULL;
-
 		pivot = prealloc_rebalance(ctxt, pivot);
 		if (!pivot)
 			return NULL;
