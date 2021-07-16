@@ -677,7 +677,12 @@ static struct sptree_node *prealloc_child(struct sptree_ctxt *ctxt, struct sptre
 	pr_info("%s: %s child of "NODE_FMT"\n", __func__,
 		(which == LEFT_CHILD) ? "left" : "right", NODE_ARG(parent));
 	ASSERT(is_new_branch(parent));
-	ASSERT(child && !is_new_branch(child));
+	ASSERT(child);
+
+	/* since rebalancing poorly balanced branches,
+	 * some nodes may get new branch children during unwind */
+	if (is_new_branch(child))
+		return child;
 
 	/* bring the child to the new branch */
 	new_child = prealloc_replace(ctxt, child);
@@ -714,14 +719,14 @@ static struct sptree_node *prealloc_child(struct sptree_ctxt *ctxt, struct sptre
 static void prealloc_propagate_change(struct sptree_ctxt *ctxt, struct sptree_node *subtree, int diff)
 {
 	struct sptree_node *parent;
-	bool left, balance_before;
+	bool left_child, balance_before;
 
 	pr_info("%s: starting at "NODE_FMT"\n", __func__, NODE_ARG(subtree));
 	ASSERT(is_new_branch(subtree));
 
 	// parent may contain L/R flags or NULL, strip flags before using as pointer
 	for (parent = subtree->parent; !is_root(parent); parent = parent->parent) {
-		left = is_left_child(parent);
+		left_child = is_left_child(parent);
 		parent = strip_flags(parent);
 
 		// act only on the new branch
@@ -731,7 +736,7 @@ static void prealloc_propagate_change(struct sptree_ctxt *ctxt, struct sptree_no
 		// parent was balanced before applying the diff
 		balance_before = parent->balance;
 
-		if (left)
+		if (left_child)
 			parent->balance -= diff;
 		else
 			parent->balance += diff;
@@ -1492,25 +1497,29 @@ static struct sptree_node *unwind_delete_retrace(struct sptree_ctxt *ctxt, struc
 {
 	struct sptree_node *prealloc, *leaf;
 	struct sptree_node *parent;
+	bool left_child;
 
 	if (is_leaf(node)) {
+		struct sptree_node fake_leaf;
+
+		__llist_add(&node->old, &ctxt->old);		/* add to chain of old nodes */
+
 		/* if that node is the only node in the tree, the new branch is empty (NULL) */
-		if (is_root(node->parent)) {
-			__llist_add(&node->old, &ctxt->old);		/* add to chain of old nodes */
+		if (is_root(node->parent))
 			return NULL;
-		}
 
-		// TODO: this is stupid, but I need a temporary leaf replacement for the functions to work
-		leaf = prealloc_replace(ctxt, node);
-		if (!leaf)
-			return ERR_PTR(-ENOMEM);
+		/* create a fake leaf on the stack to avoid allocations */
+		memcpy(&fake_leaf, node, sizeof(struct sptree_node));
+		fake_leaf.new_branch = 1;
+		leaf = &fake_leaf;
 
-		/* ...otherwise it has a parent that needs to be replaced */
+		/* prealloc parent from the fake leaf */
 		parent = prealloc_parent(ctxt, leaf);
-		if (!parent) {
-			kfree(leaf);					/* delete new leaf allocated above */
+		if (!parent)
 			return ERR_PTR(-ENOMEM);
-		}
+
+		left_child = is_left_child(leaf->parent);
+		prealloc_propagate_change(ctxt, leaf, -1);
 	}
 	else {
 		/* bubble target node to bottom */
@@ -1519,31 +1528,22 @@ static struct sptree_node *unwind_delete_retrace(struct sptree_ctxt *ctxt, struc
 			return ERR_PTR(-ENOMEM);
 
 		parent = get_parent(leaf);				/* parent is directly available */
+		left_child = is_left_child(leaf->parent);
+
+		/* nodes along this branch may be heavy towards the leaf or balanced
+		 * this also applies to its direct parent, if it's leaf-heavy,
+		 * deleting the leaf will propagate the change up the new branch */
+		prealloc_propagate_change(ctxt, leaf, -1);
+		kfree(leaf);
 	}
 
-	/* at this moment the subtree must represent a leaf node (bottom) */
-	ASSERT(is_leaf(leaf));
-	ASSERT(is_new_branch(leaf));
 	ASSERT(is_new_branch(parent));
 
-	/* nodes along this branch may be heavy towards the leaf or balanced
-	 * this also applies to its direct parent, if it's leaf-heavy,
-	 * deleting the leaf will propagate the change up the new branch */
-	prealloc_propagate_change(ctxt, leaf, -1);
-	// TODO: this case was included in prealloc_propagate_change()
-	// https://en.wikipedia.org/wiki/AVL_tree#:~:text=The%20retracing%20can%20stop%20if%20the%20balance%20factor%20becomes%20%C2%B11%20(it%20must%20have%20been%200)%20meaning%20that%20the%20height%20of%20that%20subtree%20remains%20unchanged.
-	// but it will have to be implemented overall in the fix/retrace algorithm
-
 	/* clear pointer in parent pointing to the leaf */
-	if (is_left_child(leaf->parent)) {
+	if (left_child)
 		parent->left = NULL;
-	}
-	else {
+	else
 		parent->right = NULL;
-	}
-
-	/* we don't need the leaf anymore */
-	kfree(leaf);
 
 	/* under normal case (root of a subtree being deleted) the subtree is already in AVL form */
 	/* regular bubbling (left or right) is done on an unbalanced node and won't change AVL invariants */
