@@ -113,8 +113,8 @@ static inline char node_balancing(const struct sptree_node *node)
 	}
 }
 
-#define NODE_FMT "(%lx, %d)"
-#define NODE_ARG(__node) (__node)->start, (__node)->balance
+#define NODE_FMT "(%lx, %ld)"
+#define NODE_ARG(__node) (__node)->start, (long)(__node)->balance
 
 
 /*
