@@ -4,8 +4,12 @@
 
 #include "tree.h"
 
-#define KB (1024UL)
-#define MB (KB * 1024UL)
-#define GB (MB * 1024UL)
+struct test_sptree_node {
+	/* task-specific fields */
+	unsigned long address;
+
+	/* link */
+	struct sptree_node node;
+};
 
 #endif /* _SPECIALIZED_TREE_TEST_H_ */

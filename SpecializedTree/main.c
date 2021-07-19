@@ -19,7 +19,7 @@
 
 // the object we test
 static struct sptree_root sptree_range;
-//static DEFINE_SPINLOCK(lock);
+static DEFINE_SPINLOCK(lock);
 
 // thread control
 static struct task_struct *validator;
@@ -27,22 +27,81 @@ static struct task_struct *validator;
 // access files
 static struct dentry *debugfs_dir;
 
+
+static struct sptree_node *test_alloc(void)
+{
+	struct test_sptree_node *container;
+
+	container = kzalloc(sizeof(struct test_sptree_node), GFP_ATOMIC);
+	if (!container)
+		return NULL;
+
+	return &container->node;
+}
+
+static void test_free(struct sptree_node *node)
+{
+	struct test_sptree_node *container;
+	container = container_of(node, struct test_sptree_node, node);
+
+	kfree(container);
+}
+
+static void test_free_rcu(struct sptree_node *node)
+{
+	struct test_sptree_node *container;
+	container = container_of(node, struct test_sptree_node, node);
+
+	kfree_rcu(container, node.rcu);
+
+}
+
+static unsigned long test_get_key(struct sptree_node *node)
+{
+	struct test_sptree_node *container;
+	container = container_of(node, struct test_sptree_node, node);
+
+	return container->address;
+}
+
+static void test_copy(struct sptree_node *to, struct sptree_node *from)
+{
+	struct test_sptree_node *container_to;
+	struct test_sptree_node *container_from;
+
+	container_to = container_of(to, struct test_sptree_node, node);
+	container_from = container_of(from, struct test_sptree_node, node);
+
+	memcpy(container_to, container_from, sizeof(struct test_sptree_node));
+}
+
+static struct sptree_ops test_ops = {
+	.alloc = test_alloc,
+	.free = test_free,
+	.free_rcu = test_free_rcu,
+	.get_key = test_get_key,
+	.copy = test_copy,
+};
+
 static void validate_greater(struct sptree_root *root)
 {
 	struct sptree_iterator iter;
+	struct test_sptree_node *container;
 	unsigned long prev;
 	int result = 0;
 
+	/* these have to match with the allocation functions */
 	rcu_read_lock();
 
 	prev = 0;
 	sptree_for_each_node_io(&iter, root) {
-		if (prev >= iter.node->start) {
+		container = container_of(iter.node, struct test_sptree_node, node);
+		if (prev >= container->address) {
 			result = -EINVAL;
 			break;
 		}
 
-		prev = iter.node->start;
+		prev = container->address;
 	}
 
 	rcu_read_unlock();
@@ -51,25 +110,6 @@ static void validate_greater(struct sptree_root *root)
 		pr_err("%s: invalid order detected\n", __func__);
 }
 
-//static void validate_nodes(struct sptree_root *root)
-//{
-//	struct sptree_iterator iter;
-//	int result = 0;
-//
-//	rcu_read_lock();
-//
-//	sptree_for_each_node_io(&iter, root) {
-//		struct sptree_node *node = iter.node;
-//
-//		// ...
-//	}
-//
-//	rcu_read_unlock();
-//
-//	if (result)
-//		pr_err("%s: invalid node detected\n", __func__);
-//}
-
 static int validator_func(void *arg)
 {
 	pr_info("validator started\n");
@@ -77,8 +117,6 @@ static int validator_func(void *arg)
 	do {
 		// validate each element is greater than the last
 		validate_greater(&sptree_range);
-
-		//validate_nodes(&sptree_range);
 
 		msleep_interruptible(10);
 
@@ -89,71 +127,10 @@ static int validator_func(void *arg)
 	return 0;
 }
 
-static ssize_t insert_map(struct file *file, const char __user *data, size_t count, loff_t *offs)
-{
-	unsigned long value;
-	int result;
-
-	result = kstrtoul_from_user(data, count, 16, &value);
-	if (IS_ERR_VALUE((long)result))
-		return result;
-
-	pr_info("%s: at %lx\n", __func__, value);
-
-	// check if aligned to page
-	if (value & ~PAGE_MASK) {
-		pr_err("%s: non-aligned value: %lx\n", __func__, value);
-		return -EINVAL;
-	}
-
-	//spin_lock(&lock);
-	result = standard_insert(&sptree_range, value);
-	//spin_unlock(&lock);
-
-	if (result == 0)
-		pr_info("%s: success\n", __func__);
-	else
-		pr_err("%s: failed: %d\n", __func__, result);
-	pr_info("-\n");
-
-	*offs += count;
-	return count;
-}
-
-static ssize_t delete_map(struct file *file, const char __user *data, size_t count, loff_t *offs)
-{
-	unsigned long value;
-	int result;
-
-	result = kstrtoul_from_user(data, count, 16, &value);
-	if (IS_ERR_VALUE((long)result))
-		return result;
-
-	pr_info("%s: at %lx\n", __func__, value);
-
-	// check if alligned to page
-	if (value & ~PAGE_MASK) {
-		pr_err("%s: non-aligned value: %lx\n", __func__, value);
-		return -EINVAL;
-	}
-
-	//spin_lock(&lock);
-	result = standard_delete(&sptree_range, value);
-	//spin_unlock(&lock);
-
-	if (result == 0)
-		pr_info("%s: success\n", __func__);
-	else
-		pr_err("%s: failed: %d\n", __func__, result);
-	pr_info("-\n");
-
-	*offs += count;
-	return count;
-}
-
 static ssize_t prealloc_insert_map(struct file *file, const char __user *data, size_t count, loff_t *offs)
 {
 	unsigned long value;
+	struct test_sptree_node *container;
 	int result;
 
 	result = kstrtoul_from_user(data, count, 16, &value);
@@ -168,9 +145,17 @@ static ssize_t prealloc_insert_map(struct file *file, const char __user *data, s
 		return -EINVAL;
 	}
 
-	//spin_lock(&lock);
-	result = prealloc_insert(&sptree_range, value);
-	//spin_unlock(&lock);
+	container = kzalloc(sizeof(struct test_sptree_node), GFP_ATOMIC);
+	if (!container)
+		return -ENOMEM;
+	container->address = value;
+
+	/* these have to match with the allocation functions */
+	spin_lock(&lock);
+
+	result = prealloc_insert(&sptree_range, &container->node);
+
+	spin_unlock(&lock);
 
 	if (result == 0)
 		pr_info("%s: success\n", __func__);
@@ -199,9 +184,12 @@ static ssize_t prealloc_delete_map(struct file *file, const char __user *data, s
 		return -EINVAL;
 	}
 
-	//spin_lock(&lock);
+	/* these have to match with the allocation functions */
+	spin_lock(&lock);
+
 	result = prealloc_delete(&sptree_range, value);
-	//spin_unlock(&lock);
+
+	spin_unlock(&lock);
 
 	if (result == 0)
 		pr_info("%s: success\n", __func__);
@@ -230,9 +218,12 @@ static ssize_t prealloc_unwind_map(struct file *file, const char __user *data, s
 		return -EINVAL;
 	}
 
-	//spin_lock(&lock);
+	/* these have to match with the allocation functions */
+	spin_lock(&lock);
+
 	result = prealloc_unwind(&sptree_range, value);
-	//spin_unlock(&lock);
+
+	spin_unlock(&lock);
 
 	if (result == 0)
 		pr_info("%s: success\n", __func__);
@@ -269,9 +260,12 @@ static ssize_t ror_map(struct file *file, const char __user *data, size_t count,
 		return -EINVAL;
 	}
 
-	//spin_lock(&lock);
+	/* these have to match with the allocation functions */
+	spin_lock(&lock);
+
 	result = sptree_ror(&sptree_range, value);
-	//spin_unlock(&lock);
+
+	spin_unlock(&lock);
 
 	if (result == 0)
 		pr_info("%s: success\n", __func__);
@@ -300,9 +294,12 @@ static ssize_t rol_map(struct file *file, const char __user *data, size_t count,
 		return -EINVAL;
 	}
 
-	//spin_lock(&lock);
+	/* these have to match with the allocation functions */
+	spin_lock(&lock);
+
 	result = sptree_rol(&sptree_range, value);
-	//spin_unlock(&lock);
+
+	spin_unlock(&lock);
 
 	if (result == 0)
 		pr_info("%s: success\n", __func__);
@@ -331,9 +328,12 @@ static ssize_t rrl_map(struct file *file, const char __user *data, size_t count,
 		return -EINVAL;
 	}
 
-	//spin_lock(&lock);
+	/* these have to match with the allocation functions */
+	spin_lock(&lock);
+
 	result = sptree_rrl(&sptree_range, value);
-	//spin_unlock(&lock);
+
+	spin_unlock(&lock);
 
 	if (result == 0)
 		pr_info("%s: success\n", __func__);
@@ -362,9 +362,12 @@ static ssize_t rlr_map(struct file *file, const char __user *data, size_t count,
 		return -EINVAL;
 	}
 
-	//spin_lock(&lock);
+	/* these have to match with the allocation functions */
+	spin_lock(&lock);
+
 	result = sptree_rlr(&sptree_range, value);
-	//spin_unlock(&lock);
+
+	spin_unlock(&lock);
 
 	if (result == 0)
 		pr_info("%s: success\n", __func__);
@@ -415,8 +418,9 @@ static int dump_gv_show(struct seq_file *s, void *v)
 	struct sptree_node *parent;
 	struct sptree_node *left;
 	struct sptree_node *right;
+	struct test_sptree_node *container;
 
-	// we must still enter here, case the flow control in seq_file.c won't
+	// we must still enter here, cause the flow control in seq_file.c won't
 	// print the header & footer in case ..._start() returns NULL
 	if (node == NULL)
 		return 0;
@@ -425,9 +429,10 @@ static int dump_gv_show(struct seq_file *s, void *v)
 	parent = node->parent;	// may contain L/R flags
 	left = node->left;
 	right = node->right;
+	container = container_of(node, struct test_sptree_node, node);
 
 	seq_printf(s, "\tn%lx [label=\"%lx\\n%ld\", style=filled, fillcolor=%s]\n",
-		(unsigned long)node, node->start, (long)node->balance, "green");
+		(unsigned long)node, container->address, (long)node->balance, "green");
 
 	if (left)
 		seq_printf(s, "\tn%lx -> n%lx [tailport=w]\n",
@@ -524,13 +529,14 @@ static int dump_po_show(struct seq_file *s, void *v)
 {
 	struct sptree_iterator *iter = s->private;
 	struct sptree_node *node = iter->node;
+	struct test_sptree_node *container = container_of(node, struct test_sptree_node, node);
 
 	// we must still enter here, cause the flow control in seq_file.c won't
 	// print the header & footer in case ..._start() returns NULL
 	if (node == NULL)
 		return 0;
 
-	seq_printf(s, "%lx\n", node->start);
+	seq_printf(s, "%lx\n", container->address);
 
 	return 0;
 }
@@ -566,16 +572,6 @@ int dump_po_open(struct inode *inode, struct file *file)
 
 	return seq_open(file, &dump_po_seq_ops);
 }
-
-static struct file_operations insert_map_ops = {
-	.owner = THIS_MODULE,
-	.write = insert_map,
-};
-
-static struct file_operations delete_map_ops = {
-	.owner = THIS_MODULE,
-	.write = delete_map,
-};
 
 static struct file_operations prealloc_insert_map_ops = {
 	.owner = THIS_MODULE,
@@ -641,14 +637,6 @@ static int __init sptree_debugfs_init(void)
 	if (IS_ERR(debugfs_dir))
 		return PTR_ERR(debugfs_dir);
 
-	result = debugfs_create_file("insert", S_IWUGO, debugfs_dir, NULL, &insert_map_ops);
-	if (IS_ERR(result))
-		goto error;
-
-	result = debugfs_create_file("delete", S_IWUGO, debugfs_dir, NULL, &delete_map_ops);
-	if (IS_ERR(result))
-		goto error;
-
 	result = debugfs_create_file("prealloc_insert", S_IWUGO, debugfs_dir, NULL, &prealloc_insert_map_ops);
 	if (IS_ERR(result))
 		goto error;
@@ -702,7 +690,7 @@ static int __init sptree_test_init(void)
 	int result;
 
 	// create the sptree_range: 4KB - 1MB
-	result = standard_init(&sptree_range);
+	result = sptree_init(&sptree_range, &test_ops);
 	if (result)
 		return result;
 

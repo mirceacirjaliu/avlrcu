@@ -3,12 +3,9 @@
 #define _SPECIALIZED_TREE_H_
 
 #include <linux/types.h>
-#include <linux/rcupdate.h>
 #include <linux/llist.h>
 
 struct sptree_node {
-	unsigned long start;
-
 	struct sptree_node *parent;
 	struct sptree_node *left;
 	struct sptree_node *right;
@@ -24,10 +21,16 @@ struct sptree_node {
 	};
 };
 
+struct sptree_ops {
+	struct sptree_node *(*alloc)(void);
+	void (*free)(struct sptree_node *);
+	void (*free_rcu)(struct sptree_node *);
+	unsigned long (*get_key)(struct sptree_node *);
+	void (*copy)(struct sptree_node *, struct sptree_node *);
+};
+
 struct sptree_root {
-
-	// TODO: sptree_ops pointer goes here
-
+	struct sptree_ops *ops;
 	struct sptree_node *root;
 };
 
@@ -114,7 +117,7 @@ static inline char node_balancing(const struct sptree_node *node)
 }
 
 #define NODE_FMT "(%lx, %ld)"
-#define NODE_ARG(__node) (__node)->start, (long)(__node)->balance
+#define NODE_ARG(__node) (long)&(__node), (long)(__node)->balance
 
 
 /*
@@ -155,36 +158,21 @@ extern void sptree_iter_next_po(struct sptree_iterator *iter);
 	for (sptree_iter_first_po(_root, _iter); (_iter)->node != NULL; sptree_iter_next_po(_iter))
 
 
-extern int standard_init(struct sptree_root *root);
+extern int sptree_init(struct sptree_root *root, struct sptree_ops *ops);
 extern void sptree_free(struct sptree_root *root);
 
-// helper for operations on an address
-static inline bool address_valid(struct sptree_root *root, unsigned long addr)
-{
-	if (addr & ~PAGE_MASK)
-		return false;
-
-	return true;
-}
-
-extern struct sptree_node *search(struct sptree_root *root, unsigned long addr);
-//extern int rol_height_diff(struct sptree_node *root);
-//extern int ror_height_diff(struct sptree_node *root);
-
 // these must be protected by a lock
-extern int standard_insert(struct sptree_root *root, unsigned long addr);
-extern int standard_delete(struct sptree_root *root, unsigned long addr);
-
-extern int prealloc_insert(struct sptree_root *root, unsigned long addr);
-extern int prealloc_delete(struct sptree_root *root, unsigned long addr);
-extern int prealloc_unwind(struct sptree_root *root, unsigned long addr);
+extern int prealloc_insert(struct sptree_root *root, struct sptree_node *node);
+extern int prealloc_delete(struct sptree_root *root, unsigned long key);
+extern int prealloc_unwind(struct sptree_root *root, unsigned long key);
 
 // same for these
-extern int sptree_ror(struct sptree_root *root, unsigned long addr);
-extern int sptree_rol(struct sptree_root *root, unsigned long addr);
-extern int sptree_rrl(struct sptree_root *root, unsigned long addr);
-extern int sptree_rlr(struct sptree_root *root, unsigned long addr);
+extern int sptree_ror(struct sptree_root *root, unsigned long key);
+extern int sptree_rol(struct sptree_root *root, unsigned long key);
+extern int sptree_rrl(struct sptree_root *root, unsigned long key);
+extern int sptree_rlr(struct sptree_root *root, unsigned long key);
 
-extern struct sptree_node *sptree_search(struct sptree_root *root, unsigned long addr);
+// non-RCU protected, you need to protect it
+extern struct sptree_node *search(struct sptree_root *root, unsigned long addr);
 
 #endif // _SPECIALIZED_TREE_H_

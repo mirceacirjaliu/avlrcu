@@ -23,16 +23,17 @@ static void sptree_ctxt_init(struct sptree_ctxt *ctxt, struct sptree_root *root)
 
 /*
  * _delete_prealloc() - delete prealloc branch/subtree in case of failure
+ * @ctxt:		AVL operations environment
  * @prealloc:		The root of the new branch
  *
  * The prealloc branch is not yet inserted into the tree.
  * Will do a post-order walk and delete the nodes.
  */
-/* TODO: will have to receive thr root arg for ops->free() instead of kfree */
-static void _delete_prealloc(struct sptree_node *prealloc)
+static void _delete_prealloc(struct sptree_ctxt *ctxt, struct sptree_node *prealloc)
 {
 	struct sptree_iterator iter;
 	struct sptree_node *next;
+	struct sptree_ops *ops = ctxt->root->ops;
 
 	pr_info("%s: start at "NODE_FMT"\n", __func__, NODE_ARG(prealloc));
 	ASSERT(prealloc);
@@ -76,7 +77,7 @@ static void _delete_prealloc(struct sptree_node *prealloc)
 				iter.state = ITER_DONE;
 			}
 
-			kfree(iter.node);			// delete current node
+			ops->free(iter.node);
 
 			iter.node = next;
 			break;
@@ -180,7 +181,7 @@ static void prealloc_connect(struct sptree_node **pbranch, struct sptree_node *b
 	WRITE_ONCE(*pbranch, branch);				// finally link root
 }
 
-/**
+/*
  * prealloc_remove_old() - remove (RCU) nodes replaced by the new branch
  * @old:	The chain of old nodes.
  *
@@ -188,13 +189,13 @@ static void prealloc_connect(struct sptree_node **pbranch, struct sptree_node *b
  */
 static void prealloc_remove_old(struct sptree_ctxt *ctxt)
 {
+	struct sptree_ops *ops = ctxt->root->ops;
 	struct llist_node *node;
 	struct sptree_node *old, *temp;
 
-	// TODO: use ctxt->root->ops->free_rcu() once ops are implemented
 	node = __llist_del_all(&ctxt->old);
 	llist_for_each_entry_safe(old, temp, node, old)
-		kfree_rcu(old, rcu);
+		ops->free_rcu(old);
 }
 
 /*
@@ -206,17 +207,18 @@ static void prealloc_remove_old(struct sptree_ctxt *ctxt)
  */
 static struct sptree_node *prealloc_replace(struct sptree_ctxt *ctxt, struct sptree_node *target)
 {
+	struct sptree_ops *ops = ctxt->root->ops;
 	struct sptree_node *prealloc;
 
 	pr_info("%s: at "NODE_FMT"\n", __func__, NODE_ARG(target));
 	ASSERT(!is_new_branch(target));
 
 	/* start by allocating a node that replaces target */
-	prealloc = kzalloc(sizeof(*prealloc), GFP_ATOMIC);
+	prealloc = ops->alloc();
 	if (!prealloc)
 		return NULL;
 
-	memcpy(prealloc, target, sizeof(*prealloc));
+	ops->copy(prealloc, target);
 	prealloc->new_branch = 1;
 
 	__llist_add(&target->old, &ctxt->old);				/* add to chain of old nodes */
@@ -509,26 +511,37 @@ static struct sptree_node *prealloc_retrace(struct sptree_ctxt *ctxt, struct spt
 
 error:
 	// node should have the top of the new branch
-	_delete_prealloc(node);
+	_delete_prealloc(ctxt, node);
 
 	return NULL;
 };
 
-/* entry point */
-int prealloc_insert(struct sptree_root *root, unsigned long addr)
+/*
+ * prealloc_insert() - insert new node into the tree
+ * @root - the root of the tree
+ * @node - the new node to be added
+ *
+ * The container of the node must be allocated & compatible with deletion.
+ * The node must be zeroed before insertion.
+ * The container may be deleted by the time this function exits, so usage
+ * of the whole structure is invalid after insertion.
+ */
+int prealloc_insert(struct sptree_root *root, struct sptree_node *node)
 {
+	struct sptree_ops *ops = root->ops;
 	struct sptree_node *crnt, *parent, **pbranch;
 	struct sptree_node *prealloc;
 	struct sptree_ctxt ctxt;
 
-	if (!address_valid(root, addr))
-		return -EINVAL;
+	pr_info("%s: node "NODE_FMT"\n", __func__, NODE_ARG(node));
+	ASSERT(node->balance == 0);
+	ASSERT(is_leaf(node));
 
 	/* look for a parent */
 	for (crnt = root->root, parent = NULL; crnt != NULL; ) {
-		if (unlikely(addr == crnt->start))
+		if (unlikely(ops->get_key(node) == ops->get_key(crnt)))
 			return -EINVAL;
-		else if (addr < crnt->start) {
+		else if (ops->get_key(node) < ops->get_key(crnt)) {
 			parent = make_left(crnt);
 			crnt = crnt->left;
 		}
@@ -538,19 +551,13 @@ int prealloc_insert(struct sptree_root *root, unsigned long addr)
 		}
 	}
 
-	/* alloc the new node & fill it - this is the first node in the preallocated branch */
-	prealloc = kzalloc(sizeof(*prealloc), GFP_ATOMIC);
-	if (!prealloc)
-		return -ENOMEM;
-
-	prealloc->start = addr;
-	prealloc->parent = parent;		/* only link one way */
-	prealloc->new_branch = 1;
+	node->parent = parent;		/* only link one way */
+	node->new_branch = 1;
 
 	sptree_ctxt_init(&ctxt, root);
 
 	/* retrace generates the preallocated branch */
-	prealloc = prealloc_retrace(&ctxt, prealloc);
+	prealloc = prealloc_retrace(&ctxt, node);
 	if (!prealloc)
 		return -ENOMEM;
 
@@ -1316,22 +1323,19 @@ static struct sptree_node *_prealloc_unwind(struct sptree_ctxt *ctxt, struct spt
 error:
 	// walk the parent to the top of the preallocated branch
 	prealloc = prealloc_top(prealloc);
-	_delete_prealloc(prealloc);
+	_delete_prealloc(ctxt, prealloc);
 
 	return NULL;
 }
 
 // TODO: temp entry point for testing the unwind function
-int prealloc_unwind(struct sptree_root *root, unsigned long addr)
+int prealloc_unwind(struct sptree_root *root, unsigned long key)
 {
 	struct sptree_node *target, *parent, **pbranch;
 	struct sptree_node *prealloc;
 	struct sptree_ctxt ctxt;
 
-	if (!address_valid(root, addr))
-		return -EINVAL;
-
-	target = search(root, addr);
+	target = search(root, key);
 	if (!target)
 		return -ENXIO;
 
@@ -1486,7 +1490,7 @@ static struct sptree_node *delete_retrace(struct sptree_ctxt *ctxt, struct sptre
 
 error:
 	node = prealloc_top(node);
-	_delete_prealloc(node);
+	_delete_prealloc(ctxt, node);
 
 	return NULL;
 }
@@ -1495,6 +1499,7 @@ error:
 /* WARNING: can return NULL as a valid value (check corner case) */
 static struct sptree_node *unwind_delete_retrace(struct sptree_ctxt *ctxt, struct sptree_node *node)
 {
+	struct sptree_ops *ops = ctxt->root->ops;
 	struct sptree_node *prealloc, *leaf;
 	struct sptree_node *parent;
 	bool left_child;
@@ -1534,7 +1539,7 @@ static struct sptree_node *unwind_delete_retrace(struct sptree_ctxt *ctxt, struc
 		 * this also applies to its direct parent, if it's leaf-heavy,
 		 * deleting the leaf will propagate the change up the new branch */
 		prealloc_propagate_change(ctxt, leaf, -1);
-		kfree(leaf);
+		ops->free(leaf);
 	}
 
 	ASSERT(is_new_branch(parent));
@@ -1567,25 +1572,22 @@ static struct sptree_node *unwind_delete_retrace(struct sptree_ctxt *ctxt, struc
 }
 
 /*
- * TODO: If the subtree whose root is being deleted changes height,
- * this change must propagate above the previous parent - retrace !!!!
+ * prealloc_delete() - delete a node from the tree
+ * @root - root of the tree
+ * @key - key of the node to delete
  *
- * TODO: When deleting a leaf node, that node itself (the old node) has to be deleted (RCU delete).
- * When deleting a subtree root, it has to bubble down the tree, delete the node on the new path,
- * (the node on the old path also has to be deleted), then retrace can create new nodes on the
- * new path.
- *
+ * Returns:	0 - success
+ *		-ENXIO - node was not found
+ *		-ENOMEM - allocations failed
+ * On error, the tree is not modified.
  */
-int prealloc_delete(struct sptree_root *root, unsigned long addr)
+int prealloc_delete(struct sptree_root *root, unsigned long key)
 {
 	struct sptree_node *target, *parent, **pbranch;
 	struct sptree_node *prealloc;
 	struct sptree_ctxt ctxt;
 
-	if (!address_valid(root, addr))
-		return -EINVAL;
-
-	target = search(root, addr);
+	target = search(root, key);
 	if (!target)
 		return -ENXIO;
 
