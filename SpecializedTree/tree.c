@@ -16,7 +16,7 @@ int sptree_init(struct sptree_root *root, struct sptree_ops *ops)
 	root->ops = ops;
 	root->root = NULL;
 
-	pr_info("%s: created empty root\n", __func__);
+	pr_debug("%s: created empty root\n", __func__);
 
 	return 0;
 }
@@ -95,7 +95,7 @@ struct sptree_node *search(struct sptree_root *root, unsigned long addr)
 	struct sptree_ops *ops = root->ops;
 	struct sptree_node *crnt;
 
-	pr_info("%s: looking for %lx\n", __func__, addr);
+	pr_debug("%s: looking for %lx\n", __func__, addr);
 
 	for (crnt = root->root; crnt != NULL; ) {
 		if (addr == ops->get_key(crnt))
@@ -107,9 +107,9 @@ struct sptree_node *search(struct sptree_root *root, unsigned long addr)
 	}
 
 	if (crnt == NULL)
-		pr_info("%s: found nothing\n", __func__);
+		pr_debug("%s: found nothing\n", __func__);
 	else
-		pr_info("%s: found inside "NODE_FMT"\n", __func__, NODE_ARG(crnt));
+		pr_debug("%s: found inside "NODE_FMT"\n", __func__, NODE_ARG(crnt));
 
 	return crnt;
 }
@@ -266,7 +266,7 @@ static struct sptree_node *rotate_right_rcu(struct sptree_node *root, struct spt
 	struct sptree_node *new_root;
 	struct sptree_node *new_pivot;
 
-	pr_info("%s: rotate right at "NODE_FMT", pivot at "NODE_FMT"\n",
+	pr_debug("%s: rotate right at "NODE_FMT", pivot at "NODE_FMT"\n",
 		__func__, NODE_ARG(root), NODE_ARG(pivot));
 
 	BUG_ON(*proot != root);
@@ -333,7 +333,7 @@ static struct sptree_node *rotate_left_rcu(struct sptree_node *root, struct sptr
 	struct sptree_node *new_root;
 	struct sptree_node *new_pivot;
 
-	pr_info("%s: rotate left at "NODE_FMT", pivot at "NODE_FMT"\n",
+	pr_debug("%s: rotate left at "NODE_FMT", pivot at "NODE_FMT"\n",
 		__func__, NODE_ARG(root), NODE_ARG(pivot));
 
 	BUG_ON(*proot != root);
@@ -410,11 +410,11 @@ static int ror_height_diff(struct sptree_node *root)
 	}
 
 	if (diff == -1)
-		pr_info("%s: height of "NODE_FMT" decreases\n", __func__, NODE_ARG(root));
+		pr_debug("%s: height of "NODE_FMT" decreases\n", __func__, NODE_ARG(root));
 	else if (diff == 1)
-		pr_info("%s: height of "NODE_FMT" increases\n", __func__, NODE_ARG(root));
+		pr_debug("%s: height of "NODE_FMT" increases\n", __func__, NODE_ARG(root));
 	else
-		pr_info("%s: height of "NODE_FMT" stays the same\n", __func__, NODE_ARG(root));
+		pr_debug("%s: height of "NODE_FMT" stays the same\n", __func__, NODE_ARG(root));
 
 	return diff;
 }
@@ -448,11 +448,11 @@ static int rol_height_diff(struct sptree_node *root)
 	}
 
 	if (diff == -1)
-		pr_info("%s: height of "NODE_FMT" decreases\n", __func__, NODE_ARG(root));
+		pr_debug("%s: height of "NODE_FMT" decreases\n", __func__, NODE_ARG(root));
 	else if (diff == 1)
-		pr_info("%s: height of "NODE_FMT" increases\n", __func__, NODE_ARG(root));
+		pr_debug("%s: height of "NODE_FMT" increases\n", __func__, NODE_ARG(root));
 	else
-		pr_info("%s: height of "NODE_FMT" stays the same\n", __func__, NODE_ARG(root));
+		pr_debug("%s: height of "NODE_FMT" stays the same\n", __func__, NODE_ARG(root));
 
 	return diff;
 }
@@ -480,7 +480,7 @@ static void propagate_height_diff(struct sptree_node *subtree, int diff)
 		else
 			parent->balance += diff;
 
-		pr_info("%s: updated balance factor for "NODE_FMT"\n",
+		pr_debug("%s: updated balance factor for "NODE_FMT"\n",
 			__func__, NODE_ARG(parent));
 	}
 }
@@ -494,7 +494,7 @@ static struct sptree_node *rotate_right_generic(struct sptree_node *root, struct
 	struct sptree_node *new_pivot;			// new X
 	int height_diff;
 
-	pr_info("%s: rotate right at "NODE_FMT", pivot at "NODE_FMT"\n",
+	pr_debug("%s: rotate right at "NODE_FMT", pivot at "NODE_FMT"\n",
 		__func__, NODE_ARG(root), NODE_ARG(pivot));
 
 	height_diff = ror_height_diff(root);
@@ -525,7 +525,7 @@ static struct sptree_node *rotate_right_generic(struct sptree_node *root, struct
 	if (height_diff)
 		propagate_height_diff(new_root, height_diff);
 
-	pr_info("%s: rotated right, new root is "NODE_FMT"\n",
+	pr_debug("%s: rotated right, new root is "NODE_FMT"\n",
 		__func__, NODE_ARG(new_root));
 
 	return new_root;
@@ -579,7 +579,7 @@ static struct sptree_node *rotate_left_generic(struct sptree_node *root, struct 
 	struct sptree_node *new_pivot;			// new X
 	int height_diff;
 
-	pr_info("%s: rotate left at "NODE_FMT", pivot at "NODE_FMT"\n",
+	pr_debug("%s: rotate left at "NODE_FMT", pivot at "NODE_FMT"\n",
 		__func__, NODE_ARG(root), NODE_ARG(pivot));
 
 	height_diff = rol_height_diff(root);
@@ -610,7 +610,7 @@ static struct sptree_node *rotate_left_generic(struct sptree_node *root, struct 
 	if (height_diff)
 		propagate_height_diff(new_root, height_diff);
 
-	pr_info("%s: rotated left, new root is "NODE_FMT"\n",
+	pr_debug("%s: rotated left, new root is "NODE_FMT"\n",
 		__func__, NODE_ARG(new_root));
 
 	return new_root;
@@ -664,7 +664,7 @@ static struct sptree_node *rotate_right_left_generic(struct sptree_node *root, s
 	//struct sptree_node *left = right->left;	// Y
 	struct sptree_node *new_root;			// new Y
 
-	pr_info("%s: rotate right-left at "NODE_FMT"\n", __func__, NODE_ARG(root));
+	pr_debug("%s: rotate right-left at "NODE_FMT"\n", __func__, NODE_ARG(root));
 
 	// rotate right on Z
 	if (!rotate_right_generic(right, pright))
@@ -675,7 +675,7 @@ static struct sptree_node *rotate_right_left_generic(struct sptree_node *root, s
 	if (!new_root)
 		return NULL;
 
-	pr_info("%s: rotated right-left, new root is "NODE_FMT"\n",
+	pr_debug("%s: rotated right-left, new root is "NODE_FMT"\n",
 		__func__, NODE_ARG(new_root));
 
 	return new_root;
@@ -722,7 +722,7 @@ static struct sptree_node *rotate_left_right_generic(struct sptree_node *root, s
 	//struct sptree_node *right = left->right;	// Y
 	struct sptree_node *new_root;
 
-	pr_info("%s: rotate left-right at "NODE_FMT"\n", __func__, NODE_ARG(root));
+	pr_debug("%s: rotate left-right at "NODE_FMT"\n", __func__, NODE_ARG(root));
 
 	// rotate left on Z
 	if (!rotate_left_generic(left, pleft))
@@ -733,7 +733,7 @@ static struct sptree_node *rotate_left_right_generic(struct sptree_node *root, s
 	if (!new_root)
 		return NULL;
 
-	pr_info("%s: rotated left-right, new root is "NODE_FMT"\n",
+	pr_debug("%s: rotated left-right, new root is "NODE_FMT"\n",
 		__func__, NODE_ARG(new_root));
 
 	return new_root;

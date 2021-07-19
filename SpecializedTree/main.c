@@ -112,7 +112,7 @@ static void validate_greater(struct sptree_root *root)
 
 static int validator_func(void *arg)
 {
-	pr_info("validator started\n");
+	pr_debug("validator started\n");
 
 	do {
 		// validate each element is greater than the last
@@ -122,7 +122,7 @@ static int validator_func(void *arg)
 
 	} while (!kthread_should_stop());
 
-	pr_info("validator stopped\n");
+	pr_debug("validator stopped\n");
 
 	return 0;
 }
@@ -137,7 +137,7 @@ static ssize_t prealloc_insert_map(struct file *file, const char __user *data, s
 	if (IS_ERR_VALUE((long)result))
 		return result;
 
-	pr_info("%s: at %lx\n", __func__, value);
+	pr_debug("%s: at %lx\n", __func__, value);
 
 	// check if aligned to page
 	if (value & ~PAGE_MASK) {
@@ -158,10 +158,10 @@ static ssize_t prealloc_insert_map(struct file *file, const char __user *data, s
 	spin_unlock(&lock);
 
 	if (result == 0)
-		pr_info("%s: success\n", __func__);
+		pr_debug("%s: success\n", __func__);
 	else
 		pr_err("%s: failed: %d\n", __func__, result);
-	pr_info("-\n");
+	pr_debug("-\n");
 
 	*offs += count;
 	return count;
@@ -176,7 +176,7 @@ static ssize_t prealloc_delete_map(struct file *file, const char __user *data, s
 	if (IS_ERR_VALUE((long)result))
 		return result;
 
-	pr_info("%s: at %lx\n", __func__, value);
+	pr_debug("%s: at %lx\n", __func__, value);
 
 	// check if alligned to page
 	if (value & ~PAGE_MASK) {
@@ -192,10 +192,10 @@ static ssize_t prealloc_delete_map(struct file *file, const char __user *data, s
 	spin_unlock(&lock);
 
 	if (result == 0)
-		pr_info("%s: success\n", __func__);
+		pr_debug("%s: success\n", __func__);
 	else
 		pr_err("%s: failed: %d\n", __func__, result);
-	pr_info("-\n");
+	pr_debug("-\n");
 
 	*offs += count;
 	return count;
@@ -210,7 +210,7 @@ static ssize_t prealloc_unwind_map(struct file *file, const char __user *data, s
 	if (IS_ERR_VALUE((long)result))
 		return result;
 
-	pr_info("%s: at %lx\n", __func__, value);
+	pr_debug("%s: at %lx\n", __func__, value);
 
 	// check if alligned to page
 	if (value & ~PAGE_MASK) {
@@ -226,10 +226,10 @@ static ssize_t prealloc_unwind_map(struct file *file, const char __user *data, s
 	spin_unlock(&lock);
 
 	if (result == 0)
-		pr_info("%s: success\n", __func__);
+		pr_debug("%s: success\n", __func__);
 	else
 		pr_err("%s: failed: %d\n", __func__, result);
-	pr_info("-\n");
+	pr_debug("-\n");
 
 	*offs += count;
 	return count;
@@ -252,7 +252,7 @@ static ssize_t ror_map(struct file *file, const char __user *data, size_t count,
 	if (IS_ERR_VALUE((long)result))
 		return result;
 
-	pr_info("%s: at %lx\n", __func__, value);
+	pr_debug("%s: at %lx\n", __func__, value);
 
 	// check if alligned to page
 	if (value & ~PAGE_MASK) {
@@ -268,10 +268,10 @@ static ssize_t ror_map(struct file *file, const char __user *data, size_t count,
 	spin_unlock(&lock);
 
 	if (result == 0)
-		pr_info("%s: success\n", __func__);
+		pr_debug("%s: success\n", __func__);
 	else
 		pr_err("%s: failed: %d\n", __func__, result);
-	pr_info("-\n");
+	pr_debug("-\n");
 
 	*offs += count;
 	return count;
@@ -286,7 +286,7 @@ static ssize_t rol_map(struct file *file, const char __user *data, size_t count,
 	if (IS_ERR_VALUE((long)result))
 		return result;
 
-	pr_info("%s: at %lx\n", __func__, value);
+	pr_debug("%s: at %lx\n", __func__, value);
 
 	// check if alligned to page
 	if (value & ~PAGE_MASK) {
@@ -302,10 +302,10 @@ static ssize_t rol_map(struct file *file, const char __user *data, size_t count,
 	spin_unlock(&lock);
 
 	if (result == 0)
-		pr_info("%s: success\n", __func__);
+		pr_debug("%s: success\n", __func__);
 	else
 		pr_err("%s: failed: %d\n", __func__, result);
-	pr_info("-\n");
+	pr_debug("-\n");
 
 	*offs += count;
 	return count;
@@ -320,7 +320,7 @@ static ssize_t rrl_map(struct file *file, const char __user *data, size_t count,
 	if (IS_ERR_VALUE((long)result))
 		return result;
 
-	pr_info("%s: at %lx\n", __func__, value);
+	pr_debug("%s: at %lx\n", __func__, value);
 
 	// check if alligned to page
 	if (value & ~PAGE_MASK) {
@@ -336,10 +336,10 @@ static ssize_t rrl_map(struct file *file, const char __user *data, size_t count,
 	spin_unlock(&lock);
 
 	if (result == 0)
-		pr_info("%s: success\n", __func__);
+		pr_debug("%s: success\n", __func__);
 	else
 		pr_err("%s: failed: %d\n", __func__, result);
-	pr_info("-\n");
+	pr_debug("-\n");
 
 	*offs += count;
 	return count;
@@ -354,7 +354,7 @@ static ssize_t rlr_map(struct file *file, const char __user *data, size_t count,
 	if (IS_ERR_VALUE((long)result))
 		return result;
 
-	pr_info("%s: at %lx\n", __func__, value);
+	pr_debug("%s: at %lx\n", __func__, value);
 
 	// check if alligned to page
 	if (value & ~PAGE_MASK) {
@@ -370,10 +370,10 @@ static ssize_t rlr_map(struct file *file, const char __user *data, size_t count,
 	spin_unlock(&lock);
 
 	if (result == 0)
-		pr_info("%s: success\n", __func__);
+		pr_debug("%s: success\n", __func__);
 	else
 		pr_err("%s: failed: %d\n", __func__, result);
-	pr_info("-\n");
+	pr_debug("-\n");
 
 	*offs += count;
 	return count;
@@ -724,7 +724,7 @@ static void __exit sptree_test_exit(void)
 
 	sptree_free(&sptree_range);
 
-	pr_info("bye bye\n");
+	pr_debug("bye bye\n");
 }
 
 module_init(sptree_test_init);
