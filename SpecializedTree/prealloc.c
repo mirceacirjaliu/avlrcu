@@ -521,10 +521,12 @@ error:
  * @root - the root of the tree
  * @node - the new node to be added
  *
- * The container of the node must be allocated & compatible with deletion.
+ * The container of the node must be allocated & compatible with deletion callback.
  * The node must be zeroed before insertion.
- * The container may be deleted by the time this function exits, so usage
- * of the whole structure is invalid after insertion.
+ *
+ * If insertion succeeds, the container may already be deleted by the time this
+ * function exits, so usage of the whole structure is invalid after insertion.
+ * If insertion fails, it is the task of the user to delete the container.
  */
 int prealloc_insert(struct sptree_root *root, struct sptree_node *node)
 {
@@ -533,15 +535,21 @@ int prealloc_insert(struct sptree_root *root, struct sptree_node *node)
 	struct sptree_node *prealloc;
 	struct sptree_ctxt ctxt;
 
+	// manual loop-invariant code motion
+	unsigned long node_key = ops->get_key(node);
+	unsigned long crnt_key;
+
 	pr_debug("%s: node "NODE_FMT"\n", __func__, NODE_ARG(node));
 	ASSERT(node->balance == 0);
 	ASSERT(is_leaf(node));
 
 	/* look for a parent */
 	for (crnt = root->root, parent = NULL; crnt != NULL; ) {
-		if (unlikely(ops->get_key(node) == ops->get_key(crnt)))
+		crnt_key = ops->get_key(crnt);
+
+		if (unlikely(node_key == crnt_key))
 			return -EINVAL;
-		else if (ops->get_key(node) < ops->get_key(crnt)) {
+		else if (node_key < crnt_key) {
 			parent = make_left(crnt);
 			crnt = crnt->left;
 		}

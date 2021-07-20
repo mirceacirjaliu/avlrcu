@@ -173,6 +173,6 @@ extern int sptree_rrl(struct sptree_root *root, unsigned long key);
 extern int sptree_rlr(struct sptree_root *root, unsigned long key);
 
 // non-RCU protected, you need to protect it
-extern struct sptree_node *search(struct sptree_root *root, unsigned long addr);
+extern struct sptree_node *search(struct sptree_root *root, unsigned long key);
 
 #endif // _SPECIALIZED_TREE_H_

@@ -90,17 +90,20 @@ void validate_avl_balancing(struct sptree_root *root)
 
 
 // search for the node containing this address
-struct sptree_node *search(struct sptree_root *root, unsigned long addr)
+struct sptree_node *search(struct sptree_root *root, unsigned long key)
 {
 	struct sptree_ops *ops = root->ops;
 	struct sptree_node *crnt;
+	unsigned long crnt_key;
 
-	pr_debug("%s: looking for %lx\n", __func__, addr);
+	pr_debug("%s: looking for %lx\n", __func__, key);
 
 	for (crnt = root->root; crnt != NULL; ) {
-		if (addr == ops->get_key(crnt))
+		crnt_key = ops->get_key(crnt);
+
+		if (key == crnt_key)
 			break;
-		else if (addr < ops->get_key(crnt))
+		else if (key < crnt_key)
 			crnt = crnt->left;
 		else
 			crnt = crnt->right;
