@@ -118,6 +118,8 @@ struct sptree_node *search(struct sptree_root *root, unsigned long key)
 }
 
 
+// TODO: iteration may be done with a single variable by encoding the state in the flow control
+
 
 void sptree_iter_first_io(struct sptree_root *root, struct sptree_iterator *iter)
 {
@@ -137,13 +139,10 @@ void sptree_iter_next_io(struct sptree_iterator *iter)
 {
 	struct sptree_node *next;
 
-	// INFO: left/right pointers of a node are overwritten by
-	// WRITE_ONCE(*pnode, pointer) so they must be READ_ONCE()
-
 	while (iter->node) {
 		switch (iter->state) {
 		case ITER_UP:					// comes from parent...
-			next = READ_ONCE(iter->node->left);	// goes down left subtree
+			next = rcu_access_pointer(iter->node->left);	// goes down left subtree
 			if (next) {
 				iter->node = next;		// state stays the same
 				break;
@@ -154,7 +153,7 @@ void sptree_iter_next_io(struct sptree_iterator *iter)
 			}
 
 		case ITER_HANDLED:				// node has just been handled...
-			next = READ_ONCE(iter->node->right);	// goes down right subtree
+			next = rcu_access_pointer(iter->node->right);	// goes down right subtree
 			if (next) {
 				iter->node = next;
 				iter->state = ITER_UP;
@@ -162,7 +161,7 @@ void sptree_iter_next_io(struct sptree_iterator *iter)
 			} // else fallback to the next case
 
 		case ITER_RIGHT:				// comes from right subtree / handled case
-			next = READ_ONCE(iter->node->parent);	// may contain L/R flags
+			next = rcu_access_pointer(iter->node->parent);	// may contain L/R flags
 			iter->node = strip_flags(next);		// goes up anyway
 
 			if (is_root(next)) {
@@ -208,7 +207,7 @@ void sptree_iter_next_po(struct sptree_iterator *iter)
 		switch (iter->state)
 		{
 		case ITER_HANDLED:
-			next = READ_ONCE(iter->node->left);
+			next = rcu_access_pointer(iter->node->left);
 			if (next) {
 				iter->node = next;
 				iter->state = ITER_HANDLED;
@@ -216,7 +215,7 @@ void sptree_iter_next_po(struct sptree_iterator *iter)
 			}
 
 		case ITER_LEFT:
-			next = READ_ONCE(iter->node->right);
+			next = rcu_access_pointer(iter->node->right);
 			if (next) {
 				iter->node = next;
 				iter->state = ITER_HANDLED;
@@ -224,7 +223,7 @@ void sptree_iter_next_po(struct sptree_iterator *iter)
 			}
 
 		case ITER_RIGHT:
-			next = READ_ONCE(iter->node->parent);	// may contain L/R flags
+			next = rcu_access_pointer(iter->node->parent);	// may contain L/R flags
 			iter->node = strip_flags(next);		// goes up anyway
 
 			if (is_root(next)) {
@@ -300,15 +299,15 @@ static struct sptree_node *rotate_right_rcu(struct sptree_node *root, struct spt
 	new_pivot->right = root->right;
 
 	// link root (of subtree)
-	WRITE_ONCE(*proot, new_root);
+	rcu_assign_pointer(*proot, new_root);
 
 	// link parent pointers
 	if (pivot->left)
-		WRITE_ONCE(pivot->left->parent, make_left(new_root));
+		rcu_assign_pointer(pivot->left->parent, make_left(new_root));
 	if (pivot->right)
-		WRITE_ONCE(pivot->right->parent, make_left(new_pivot));
+		rcu_assign_pointer(pivot->right->parent, make_left(new_pivot));
 	if (root->right)
-		WRITE_ONCE(root->right->parent, make_right(new_pivot));
+		rcu_assign_pointer(root->right->parent, make_right(new_pivot));
 
 	// free old nodes
 	kfree_rcu(root, rcu);
@@ -367,15 +366,15 @@ static struct sptree_node *rotate_left_rcu(struct sptree_node *root, struct sptr
 	new_pivot->right = pivot->left;
 
 	// link root (of subtree)
-	WRITE_ONCE(*proot, new_root);
+	rcu_assign_pointer(*proot, new_root);
 
 	// link parent pointers
 	if (root->left)
-		WRITE_ONCE(root->left->parent, make_left(new_pivot));
+		rcu_assign_pointer(root->left->parent, make_left(new_pivot));
 	if (pivot->left)
-		WRITE_ONCE(pivot->left->parent, make_right(new_pivot));
+		rcu_assign_pointer(pivot->left->parent, make_right(new_pivot));
 	if (pivot->right)
-		WRITE_ONCE(pivot->right->parent, make_right(new_root));
+		rcu_assign_pointer(pivot->right->parent, make_right(new_root));
 
 	// free old nodes
 	kfree_rcu(root, rcu);

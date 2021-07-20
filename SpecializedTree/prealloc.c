@@ -133,7 +133,7 @@ static void prealloc_connect(struct sptree_node **pbranch, struct sptree_node *b
 					break;			// switch
 				}
 				else {
-					WRITE_ONCE(next->parent, make_right(io.node));
+					rcu_assign_pointer(next->parent, make_right(io.node));
 					io.state = ITER_RIGHT;
 					// fallback
 				}
@@ -148,7 +148,7 @@ static void prealloc_connect(struct sptree_node **pbranch, struct sptree_node *b
 					break;			// switch
 				}
 				else {
-					WRITE_ONCE(next->parent, make_left(io.node));
+					rcu_assign_pointer(next->parent, make_left(io.node));
 					io.state = ITER_LEFT;
 					// fallback
 				}
@@ -178,7 +178,7 @@ static void prealloc_connect(struct sptree_node **pbranch, struct sptree_node *b
 	}
 
 	/* ...or degenerate case (empty new branch) */
-	WRITE_ONCE(*pbranch, branch);				// finally link root
+	rcu_assign_pointer(*pbranch, branch);				// finally link root
 }
 
 /*

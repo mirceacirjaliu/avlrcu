@@ -6,9 +6,9 @@
 #include <linux/llist.h>
 
 struct sptree_node {
-	struct sptree_node *parent;
-	struct sptree_node *left;
-	struct sptree_node *right;
+	struct sptree_node __rcu *parent;
+	struct sptree_node __rcu *left;
+	struct sptree_node __rcu *right;
 
 	union {
 		struct rcu_head rcu;
@@ -31,7 +31,7 @@ struct sptree_ops {
 
 struct sptree_root {
 	struct sptree_ops *ops;
-	struct sptree_node *root;
+	struct sptree_node __rcu *root;
 };
 
 /* context for insert/delete operations */
