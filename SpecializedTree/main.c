@@ -83,31 +83,43 @@ static struct sptree_ops test_ops = {
 	.copy = test_copy,
 };
 
+static int prev_count = 0;
 static void validate_greater(struct sptree_root *root)
 {
-	struct sptree_iterator iter;
+	struct sptree_node *node;
 	struct test_sptree_node *container;
 	unsigned long prev;
+	int count;
 	int result = 0;
 
 	/* these have to match with the allocation functions */
 	rcu_read_lock();
 
 	prev = 0;
-	sptree_for_each_node_io(&iter, root) {
-		container = container_of(iter.node, struct test_sptree_node, node);
+	count = 0;
+	sptree_for_each(node, root) {
+		container = container_of(node, struct test_sptree_node, node);
 		if (prev >= container->address) {
 			result = -EINVAL;
 			break;
 		}
 
 		prev = container->address;
+		count++;
 	}
 
 	rcu_read_unlock();
 
-	if (result)
+	if (result) {
 		pr_err("%s: invalid order detected\n", __func__);
+		return;
+	}
+
+	if (count > prev_count) {
+		pr_debug("%s: found %d elements > %d\n", __func__, count, prev_count);
+		prev_count = count;
+	}
+
 }
 
 static int validator_func(void *arg)
@@ -238,6 +250,7 @@ static ssize_t prealloc_unwind_map(struct file *file, const char __user *data, s
 static ssize_t clear_map(struct file *file, const char __user *data, size_t count, loff_t *offs)
 {
 	sptree_free(&sptree_range);
+	prev_count = 0;	/* reset validator counter */
 
 	*offs += count;
 	return count;
@@ -436,11 +449,11 @@ static int dump_gv_show(struct seq_file *s, void *v)
 
 	if (left)
 		seq_printf(s, "\tn%lx -> n%lx [tailport=w]\n",
-		(unsigned long)node, (unsigned long)left);
+			(unsigned long)node, (unsigned long)left);
 
 	if (right)
 		seq_printf(s, "\tn%lx -> n%lx [tailport=e]\n",
-		(unsigned long)node, (unsigned long)right);
+			(unsigned long)node, (unsigned long)right);
 
 	if (is_root(parent)) {
 		seq_printf(s, "\troot -> n%lx [tailport=s]\n",

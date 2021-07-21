@@ -158,6 +158,14 @@ extern void sptree_iter_next_po(struct sptree_iterator *iter);
 	for (sptree_iter_first_po(_root, _iter); (_iter)->node != NULL; sptree_iter_next_po(_iter))
 
 
+/* new in-order iterator based only on pointer */
+extern struct sptree_node *sptree_first(struct sptree_root *root);
+extern struct sptree_node *sptree_next(struct sptree_node *node);
+
+#define sptree_for_each(pos, root)	\
+	for (pos = sptree_first(root); pos != NULL; pos = sptree_next(pos))
+
+
 extern int sptree_init(struct sptree_root *root, struct sptree_ops *ops);
 extern void sptree_free(struct sptree_root *root);
 

@@ -118,7 +118,67 @@ struct sptree_node *search(struct sptree_root *root, unsigned long key)
 }
 
 
-// TODO: iteration may be done with a single variable by encoding the state in the flow control
+static struct sptree_node *sptree_leftmost(struct sptree_node *node)
+{
+	struct sptree_node *next;
+
+	/* descend along the left branch */
+	for (;;) {
+		next = rcu_access_pointer(node->left);
+		if (next) {
+			node = next;
+			continue;
+		}
+
+		next = rcu_access_pointer(node->right);
+		if (next) {
+			node = next;
+			continue;
+		}
+
+		return node;
+	}
+}
+
+static struct sptree_node *sptree_successor(struct sptree_node *node)
+{
+	struct sptree_node *next;
+
+	/* ascend along the right branch */
+	for (;;) {
+		next = rcu_access_pointer(node->parent);
+
+		if (is_left_child(next))
+			return strip_flags(next);
+
+		if (is_root(next))
+			return NULL;
+
+		node = strip_flags(next);
+	}
+}
+
+struct sptree_node *sptree_first(struct sptree_root *root)
+{
+	struct sptree_node *next = rcu_access_pointer(root->root);
+
+	if (unlikely(!next))
+		return NULL;
+
+	return sptree_leftmost(next);
+}
+
+struct sptree_node *sptree_next(struct sptree_node *node)
+{
+	struct sptree_node *next;
+
+	/* in-order LNR -> next is right */
+	next = rcu_access_pointer(node->right);
+	if (next)
+		return sptree_leftmost(next);
+
+	return sptree_successor(node);
+}
 
 
 void sptree_iter_first_io(struct sptree_root *root, struct sptree_iterator *iter)
