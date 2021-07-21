@@ -393,50 +393,38 @@ static ssize_t rlr_map(struct file *file, const char __user *data, size_t count,
 }
 
 
+// TODO: this crap doesn't create the first file when the tree is empty
+// TODO: must add it as a corner case !!
+
 static void *dump_gv_start(struct seq_file *s, loff_t *pos)
 {
-	struct sptree_iterator *iter = s->private;
+	struct sptree_node *node = s->private;
 
-	// did we have overflow ??
-	if (iter) {
-		if (iter->node == NULL)
-			return NULL;
-		else
-			return iter;
-	}
+	/* new session */
+	if (node)
+		return node;
 
-	// alloc & init iterator
-	iter = kmalloc(sizeof(*iter), GFP_KERNEL);
-	if (!iter)
+	/* past end of file condition */
+	if (*pos)
 		return NULL;
 
-	sptree_iter_first_io(&sptree_range, iter);
-	s->private = iter;
+	node = sptree_first(&sptree_range);
+	s->private = node;
 
 	// print header
 	seq_puts(s, "digraph G {\n");
 	seq_puts(s, "\troot [label=\"ROOT\", shape=box]\n");
 
-	// in case of an empty tree we still want the header & footer
-	//if (iter->node == NULL)
-	//	return NULL;
-
-	return iter;
+	return node;
 }
 
 static int dump_gv_show(struct seq_file *s, void *v)
 {
-	struct sptree_iterator *iter = s->private;
-	struct sptree_node *node = iter->node;
+	struct sptree_node *node = s->private;
 	struct sptree_node *parent;
 	struct sptree_node *left;
 	struct sptree_node *right;
 	struct test_sptree_node *container;
-
-	// we must still enter here, cause the flow control in seq_file.c won't
-	// print the header & footer in case ..._start() returns NULL
-	if (node == NULL)
-		return 0;
 
 	// warning: ISO C90 forbids mixed declarations and code
 	parent = node->parent;	// may contain L/R flags
@@ -475,25 +463,22 @@ static int dump_gv_show(struct seq_file *s, void *v)
 
 static void *dump_gv_next(struct seq_file *s, void *v, loff_t *pos)
 {
-	struct sptree_iterator *iter = s->private;
+	struct sptree_node *node = s->private;
 
 	(*pos)++;
-	sptree_iter_next_io(iter);
-	if (iter->node == NULL)
-		return NULL;
+	node = sptree_next(node);
+	s->private = node;
 
-	return iter;
+	return node;
 }
 
 static void dump_gv_stop(struct seq_file *s, void *v)
 {
-	struct sptree_iterator *iter = s->private;
+	struct sptree_node *node = s->private;
 
 	// print footer
-	if (iter->node == NULL)
+	if (node == NULL)
 		seq_puts(s, "}\n");
-
-	// iterator is freed by seq_release_private()
 }
 
 static struct seq_operations dump_gv_seq_ops = {
@@ -631,7 +616,7 @@ static struct file_operations dump_gv_map_ops = {
 	.open = dump_gv_open,
 	.read = seq_read,
 	.llseek = seq_lseek,
-	.release = seq_release_private
+	.release = seq_release
 };
 
 static struct file_operations dump_po_map_ops = {

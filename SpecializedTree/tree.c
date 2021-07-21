@@ -130,12 +130,6 @@ static struct sptree_node *sptree_leftmost(struct sptree_node *node)
 			continue;
 		}
 
-		next = rcu_access_pointer(node->right);
-		if (next) {
-			node = next;
-			continue;
-		}
-
 		return node;
 	}
 }
