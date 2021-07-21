@@ -497,80 +497,6 @@ int dump_gv_open(struct inode *inode, struct file *file)
 }
 
 
-static void *dump_po_start(struct seq_file *s, loff_t *pos)
-{
-	struct sptree_iterator *iter = s->private;
-
-	// did we have overflow ??
-	if (iter) {
-		if (iter->node == NULL)
-			return NULL;
-		else
-			return iter;
-	}
-
-	// alloc & init iterator
-	iter = kmalloc(sizeof(*iter), GFP_KERNEL);
-	if (!iter)
-		return NULL;
-
-	sptree_iter_first_po(&sptree_range, iter);
-	s->private = iter;
-
-	//if (iter->node == NULL)
-	//	return NULL;
-
-	return iter;
-}
-
-static int dump_po_show(struct seq_file *s, void *v)
-{
-	struct sptree_iterator *iter = s->private;
-	struct sptree_node *node = iter->node;
-	struct test_sptree_node *container = container_of(node, struct test_sptree_node, node);
-
-	// we must still enter here, cause the flow control in seq_file.c won't
-	// print the header & footer in case ..._start() returns NULL
-	if (node == NULL)
-		return 0;
-
-	seq_printf(s, "%lx\n", container->address);
-
-	return 0;
-}
-
-static void *dump_po_next(struct seq_file *s, void *v, loff_t *pos)
-{
-	struct sptree_iterator *iter = s->private;
-
-	sptree_iter_next_po(iter);
-	if (iter->node == NULL)
-		return NULL;
-
-	(*pos)++;
-	return iter;
-}
-
-static void dump_po_stop(struct seq_file *s, void *v)
-{
-	// iterator is freed by seq_release_private()
-}
-
-static struct seq_operations dump_po_seq_ops = {
-	.start = dump_po_start,
-	.next = dump_po_next,
-	.show = dump_po_show,
-	.stop = dump_po_stop,
-};
-
-int dump_po_open(struct inode *inode, struct file *file)
-{
-	// can't seek on a tree without a walk & ignore
-	file->f_mode &= ~FMODE_LSEEK;
-
-	return seq_open(file, &dump_po_seq_ops);
-}
-
 static struct file_operations prealloc_insert_map_ops = {
 	.owner = THIS_MODULE,
 	.write = prealloc_insert_map,
@@ -619,14 +545,6 @@ static struct file_operations dump_gv_map_ops = {
 	.release = seq_release
 };
 
-static struct file_operations dump_po_map_ops = {
-	.owner = THIS_MODULE,
-	.open = dump_po_open,
-	.read = seq_read,
-	.llseek = seq_lseek,
-	.release = seq_release_private
-};
-
 static int __init sptree_debugfs_init(void)
 {
 	static struct dentry *result;
@@ -668,10 +586,6 @@ static int __init sptree_debugfs_init(void)
 		goto error;
 
 	result = debugfs_create_file("dump_gv", S_IRUGO, debugfs_dir, NULL, &dump_gv_map_ops);
-	if (IS_ERR(result))
-		goto error;
-
-	result = debugfs_create_file("dump_map", S_IRUGO, debugfs_dir, NULL, &dump_po_map_ops);
 	if (IS_ERR(result))
 		goto error;
 
