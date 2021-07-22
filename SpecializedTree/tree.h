@@ -142,21 +142,6 @@ struct sptree_iterator {
 	enum sptree_iter_state state;
 };
 
-/* In-order iteration (should be immune to tree operations) */
-extern void sptree_iter_first_io(struct sptree_root *root, struct sptree_iterator *iter);
-extern void sptree_iter_next_io(struct sptree_iterator *iter);
-
-#define sptree_for_each_node_io(_iter, _root)	\
-	for (sptree_iter_first_io(_root, _iter); (_iter)->node != NULL; sptree_iter_next_io(_iter))
-
-
-/* Pre-order iteration (don't know if immune to tree operations) */
-extern void sptree_iter_first_po(struct sptree_root *root, struct sptree_iterator *iter);
-extern void sptree_iter_next_po(struct sptree_iterator *iter);
-
-#define sptree_for_each_node_po(_iter, _root)	\
-	for (sptree_iter_first_po(_root, _iter); (_iter)->node != NULL; sptree_iter_next_po(_iter))
-
 
 /* new in-order iterator based only on pointer */
 extern struct sptree_node *sptree_first(struct sptree_root *root);
