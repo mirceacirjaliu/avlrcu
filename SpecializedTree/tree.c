@@ -97,15 +97,16 @@ struct sptree_node *search(struct sptree_root *root, unsigned long key)
 
 	pr_debug("%s: looking for %lx\n", __func__, key);
 
-	for (crnt = root->root; crnt != NULL; ) {
+	crnt = rcu_access_pointer(root->root);
+	while (crnt) {
 		crnt_key = ops->get_key(crnt);
 
 		if (key == crnt_key)
 			break;
 		else if (key < crnt_key)
-			crnt = crnt->left;
+			crnt = rcu_access_pointer(crnt->left);
 		else
-			crnt = crnt->right;
+			crnt = rcu_access_pointer(crnt->right);
 	}
 
 	if (crnt == NULL)
