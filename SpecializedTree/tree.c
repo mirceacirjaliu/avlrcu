@@ -118,6 +118,7 @@ struct sptree_node *search(struct sptree_root *root, unsigned long key)
 }
 
 
+/* in-order iteration */
 static struct sptree_node *sptree_leftmost(struct sptree_node *node)
 {
 	struct sptree_node *next;
@@ -172,6 +173,53 @@ struct sptree_node *sptree_next(struct sptree_node *node)
 		return sptree_leftmost(next);
 
 	return sptree_successor(node);
+}
+
+
+/* post-order iteration */
+static struct sptree_node *sptree_left_deepest(struct sptree_node *node)
+{
+	struct sptree_node *next;
+
+	for (;;) {
+		next = rcu_access_pointer(node->left);
+		if (next) {
+			node = next;
+			continue;
+		}
+
+		next = rcu_access_pointer(node->right);
+		if (next) {
+			node = next;
+			continue;
+		}
+
+		return node;
+	}
+}
+
+extern struct sptree_node *sptree_first_po(struct sptree_root *root)
+{
+	struct sptree_node *next = rcu_access_pointer(root->root);
+
+	if (unlikely(!next))
+		return NULL;
+
+	return sptree_left_deepest(next);
+}
+
+extern struct sptree_node *sptree_next_po(struct sptree_node *node)
+{
+	struct sptree_node *parent = rcu_access_pointer(node->parent);
+	struct sptree_node *next;
+
+	if (!is_root(parent) && is_left_child(parent)) {
+		parent = strip_flags(parent);
+		next = rcu_access_pointer(parent->right);
+		return sptree_left_deepest(next);
+	}
+	else
+		return strip_flags(parent);
 }
 
 

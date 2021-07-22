@@ -143,18 +143,6 @@ struct sptree_iterator {
 };
 
 
-/* new in-order iterator based only on pointer */
-extern struct sptree_node *sptree_first(struct sptree_root *root);
-extern struct sptree_node *sptree_next(struct sptree_node *node);
-
-/**
- * sptree_for_each - iterate in-order over nodes in a tree
- * @pos:	the &struct sptree_node to use as a loop cursor.
- * @root:	the root of the tree.
- */
-#define sptree_for_each(pos, root)	\
-	for (pos = sptree_first(root); pos != NULL; pos = sptree_next(pos))
-
 /**
  * sptree_entry - get the struct for this entry
  * @ptr:	the &struct sptree_node pointer.
@@ -169,6 +157,18 @@ extern struct sptree_node *sptree_next(struct sptree_node *node);
 	   ____ptr ? sptree_entry(____ptr, type, member) : NULL; \
 	})
 
+/* in-order iterator */
+extern struct sptree_node *sptree_first(struct sptree_root *root);
+extern struct sptree_node *sptree_next(struct sptree_node *node);
+
+/**
+ * sptree_for_each - iterate in-order over nodes in a tree
+ * @pos:	the &struct sptree_node to use as a loop cursor.
+ * @root:	the root of the tree.
+ */
+#define sptree_for_each(pos, root)	\
+	for (pos = sptree_first(root); pos != NULL; pos = sptree_next(pos))
+
 /**
  * sptree_for_each_entry - iterate in-order over tree of given type
  * @pos:	the type * to use as a loop cursor.
@@ -179,6 +179,19 @@ extern struct sptree_node *sptree_next(struct sptree_node *node);
 	for (pos = sptree_entry_safe(sptree_first(root), typeof(*(pos)), member);	\
 	     pos != NULL;								\
 	     pos = sptree_entry_safe(sptree_next(&(pos)->member), typeof(*(pos)), member))
+
+
+ /* post-order iterator */
+extern struct sptree_node *sptree_first_po(struct sptree_root *root);
+extern struct sptree_node *sptree_next_po(struct sptree_node *node);
+
+#define sptree_for_each_po(pos, root)	\
+	for (pos = sptree_first_po(root); pos != NULL; pos = sptree_next_po(pos))
+
+#define sptree_for_each_entry_po(pos, root, member)					\
+	for (pos = sptree_entry_safe(sptree_first_po(root), typeof(*(pos)), member);	\
+	     pos != NULL;								\
+	     pos = sptree_entry_safe(sptree_next_po(&(pos)->member), typeof(*(pos)), member))
 
 
 extern int sptree_init(struct sptree_root *root, struct sptree_ops *ops);

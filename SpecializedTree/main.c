@@ -507,6 +507,67 @@ int dump_gv_open(struct inode *inode, struct file *file)
 }
 
 
+static void *dump_po_start(struct seq_file *s, loff_t *pos)
+{
+	struct sptree_node *node = s->private;
+
+	/* new session */
+	if (node)
+		return node;
+
+	/* past end of file condition */
+	if (*pos)
+		return NULL;
+
+	node = sptree_first_po(&sptree_range);
+	s->private = node;
+
+	return node;
+}
+
+static int dump_po_show(struct seq_file *s, void *v)
+{
+	struct sptree_node *node = s->private;
+	struct test_sptree_node *container = sptree_entry(node, struct test_sptree_node, node);
+
+	seq_printf(s, "%lx\n", container->address);
+
+	return 0;
+}
+
+static void *dump_po_next(struct seq_file *s, void *v, loff_t *pos)
+{
+	struct sptree_node *node = s->private;
+
+	(*pos)++;
+	node = sptree_next_po(node);
+	s->private = node;
+
+	return node;
+}
+
+static void dump_po_stop(struct seq_file *s, void *v)
+{
+	//struct sptree_node *node = s->private;
+
+}
+
+static struct seq_operations dump_po_seq_ops = {
+	       .start = dump_po_start,
+	       .next = dump_po_next,
+	       .show = dump_po_show,
+	       .stop = dump_po_stop,
+};
+
+int dump_po_open(struct inode *inode, struct file *file)
+{
+	 // can't seek on a tree without a walk & ignore
+	file->f_mode &= ~FMODE_LSEEK;
+
+	return seq_open(file, &dump_po_seq_ops);
+}
+
+
 static struct file_operations prealloc_insert_map_ops = {
 	.owner = THIS_MODULE,
 	.write = prealloc_insert_map,
@@ -555,6 +616,14 @@ static struct file_operations dump_gv_map_ops = {
 	.release = seq_release
 };
 
+static struct file_operations dump_po_map_ops = {
+	.owner = THIS_MODULE,
+	.open = dump_po_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = seq_release,
+};
+
 static int __init sptree_debugfs_init(void)
 {
 	static struct dentry *result;
@@ -596,6 +665,10 @@ static int __init sptree_debugfs_init(void)
 		goto error;
 
 	result = debugfs_create_file("dump_gv", S_IRUGO, debugfs_dir, NULL, &dump_gv_map_ops);
+	if (IS_ERR(result))
+		goto error;
+
+	result = debugfs_create_file("dump_po", S_IRUGO, debugfs_dir, NULL, &dump_po_map_ops);
 	if (IS_ERR(result))
 		goto error;
 
