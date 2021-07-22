@@ -391,8 +391,9 @@ static ssize_t rlr_map(struct file *file, const char __user *data, size_t count,
 }
 
 
-// TODO: this crap doesn't create the first file when the tree is empty
-// TODO: must add it as a corner case !!
+/* even if tree is empty, return a valid value for header, root, footer
+ * NULL means past end of file condition */
+#define DUMMY_NODE_END_OF_TREE	((struct sptree_node *) 1)
 
 static void *dump_gv_start(struct seq_file *s, loff_t *pos)
 {
@@ -407,9 +408,11 @@ static void *dump_gv_start(struct seq_file *s, loff_t *pos)
 		return NULL;
 
 	node = sptree_first(&sptree_range);
+	if (!node)
+		node = DUMMY_NODE_END_OF_TREE;
 	s->private = node;
 
-	// print header
+	/* print header */
 	seq_puts(s, "digraph G {\n");
 	seq_puts(s, "\troot [label=\"ROOT\", shape=box]\n");
 
@@ -419,10 +422,16 @@ static void *dump_gv_start(struct seq_file *s, loff_t *pos)
 static int dump_gv_show(struct seq_file *s, void *v)
 {
 	struct sptree_node *node = s->private;
-	struct sptree_node *parent = node->parent;
-	struct sptree_node *left = node->left;
-	struct sptree_node *right = node->right;
-	struct test_sptree_node *container = sptree_entry(node, struct test_sptree_node, node);
+	struct sptree_node *parent, *left, *right;
+	struct test_sptree_node *container;
+
+	if (unlikely(node == DUMMY_NODE_END_OF_TREE))
+		return 0;
+
+	parent = node->parent;
+	left = node->left;
+	right = node->right;
+	container = sptree_entry(node, struct test_sptree_node, node);
 
 	seq_printf(s, "\tn%lx [label=\"%lx\\n%ld\", style=filled, fillcolor=%s]\n",
 		(unsigned long)node, container->address, (long)node->balance, "green");
@@ -458,9 +467,16 @@ static void *dump_gv_next(struct seq_file *s, void *v, loff_t *pos)
 	struct sptree_node *node = s->private;
 
 	(*pos)++;
-	node = sptree_next(node);
-	s->private = node;
+	if (node == DUMMY_NODE_END_OF_TREE)
+		return NULL;
 
+	node = sptree_next(node);
+	if (!node) {
+		s->private = DUMMY_NODE_END_OF_TREE;
+		return NULL;
+	}
+
+	s->private = node;
 	return node;
 }
 
@@ -468,9 +484,11 @@ static void dump_gv_stop(struct seq_file *s, void *v)
 {
 	struct sptree_node *node = s->private;
 
-	// print footer
-	if (node == NULL)
+	/* print footer, do not react on NULL */
+	if (node == DUMMY_NODE_END_OF_TREE) {
 		seq_puts(s, "}\n");
+		s->private = NULL;
+	}
 }
 
 static struct seq_operations dump_gv_seq_ops = {
