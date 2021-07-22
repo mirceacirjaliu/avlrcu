@@ -247,8 +247,13 @@ static ssize_t prealloc_unwind_map(struct file *file, const char __user *data, s
 
 static ssize_t clear_map(struct file *file, const char __user *data, size_t count, loff_t *offs)
 {
+	/* these have to match with the allocation functions */
+	spin_lock(&lock);
+
 	sptree_free(&sptree_range);
 	prev_count = 0;	/* reset validator counter */
+
+	spin_unlock(&lock);
 
 	*offs += count;
 	return count;

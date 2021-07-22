@@ -21,32 +21,22 @@ int sptree_init(struct sptree_root *root, struct sptree_ops *ops)
 	return 0;
 }
 
-// recursive post-order free function
-static void postorder_free(struct sptree_ops *ops, struct sptree_node *node)
-{
-	if (!node)
-		return;
-
-	if (node->left)
-		postorder_free(ops, node->left);
-
-	if (node->right)
-		postorder_free(ops, node->right);
-
-	ops->free(node);
-}
-
 void sptree_free(struct sptree_root *root)
 {
-	struct sptree_node *tree;
+	struct sptree_ops *ops = root->ops;
+	struct sptree_node *node, *temp;
+	struct sptree_root temp_root;
 
-	tree = root->root;
-	root->root = NULL;
+	temp_root.root = root->root;
+	rcu_assign_pointer(root->root, NULL);
 
+	// TODO: this is RCU dependent
 	synchronize_rcu();
+	// TODO: maybe implement ops->sync() ?
 
 	// post-order traversal and remove the nodes
-	postorder_free(root->ops, tree);
+	sptree_for_each_po_safe(node, temp, &temp_root)
+		ops->free(node);
 }
 
 
@@ -210,13 +200,19 @@ extern struct sptree_node *sptree_first_po(struct sptree_root *root)
 
 extern struct sptree_node *sptree_next_po(struct sptree_node *node)
 {
-	struct sptree_node *parent = rcu_access_pointer(node->parent);
-	struct sptree_node *next;
+	struct sptree_node *parent, *next;
 
+	if (!node)
+		return NULL;
+
+	parent = rcu_access_pointer(node->parent);
 	if (!is_root(parent) && is_left_child(parent)) {
 		parent = strip_flags(parent);
 		next = rcu_access_pointer(parent->right);
-		return sptree_left_deepest(next);
+		if (next)
+			return sptree_left_deepest(next);
+		else
+			return parent;
 	}
 	else
 		return strip_flags(parent);

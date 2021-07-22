@@ -193,6 +193,20 @@ extern struct sptree_node *sptree_next_po(struct sptree_node *node);
 	     pos != NULL;								\
 	     pos = sptree_entry_safe(sptree_next_po(&(pos)->member), typeof(*(pos)), member))
 
+/**
+ * sptree_for_each_po_safe - iterate post-order over a tree safe against removal of nodes
+ * @pos:	the &struct sptree_node to use as a loop cursor.
+ * @n:		another &struct sptree_node to use as temporary storage
+ * @root:	the root of the tree.
+ *
+ * Don't dare use this to delete nodes from a live tree.
+ * Nodes must be first decoupled & made unreachable.
+ * See sptree_free().
+ */
+#define sptree_for_each_po_safe(pos, n, root)		\
+	for (pos = sptree_first_po(root);		\
+	     pos && ({ n = sptree_next_po(pos); 1; });	\
+	     pos = sptree_next_po(n))
 
 extern int sptree_init(struct sptree_root *root, struct sptree_ops *ops);
 extern void sptree_free(struct sptree_root *root);
