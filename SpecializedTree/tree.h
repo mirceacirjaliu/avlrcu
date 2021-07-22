@@ -201,7 +201,6 @@ extern struct sptree_node *sptree_next_po(struct sptree_node *node);
  *
  * Don't dare use this to delete nodes from a live tree.
  * Nodes must be first decoupled & made unreachable.
- * See sptree_free().
  */
 #define sptree_for_each_po_safe(pos, n, root)		\
 	for (pos = sptree_first_po(root);		\
@@ -209,20 +208,20 @@ extern struct sptree_node *sptree_next_po(struct sptree_node *node);
 	     pos = sptree_next_po(n))
 
 extern int sptree_init(struct sptree_root *root, struct sptree_ops *ops);
-extern void sptree_free(struct sptree_root *root);
 
-// these must be protected by a lock
+/* write-side calls, must be protected by a lock */
+extern void sptree_free(struct sptree_root *root);
 extern int prealloc_insert(struct sptree_root *root, struct sptree_node *node);
 extern int prealloc_delete(struct sptree_root *root, unsigned long key);
-extern int prealloc_unwind(struct sptree_root *root, unsigned long key);
 
-// same for these
+/* test functions, also write-side calls, must be protected by a lock */
+extern int prealloc_unwind(struct sptree_root *root, unsigned long key);
 extern int sptree_ror(struct sptree_root *root, unsigned long key);
 extern int sptree_rol(struct sptree_root *root, unsigned long key);
 extern int sptree_rrl(struct sptree_root *root, unsigned long key);
 extern int sptree_rlr(struct sptree_root *root, unsigned long key);
 
-// non-RCU protected, you need to protect it
+/* read-side calls, must be protected by (S)RCU section */
 extern struct sptree_node *search(struct sptree_root *root, unsigned long key);
 
 #endif // _SPECIALIZED_TREE_H_

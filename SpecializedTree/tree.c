@@ -24,19 +24,16 @@ int sptree_init(struct sptree_root *root, struct sptree_ops *ops)
 void sptree_free(struct sptree_root *root)
 {
 	struct sptree_ops *ops = root->ops;
-	struct sptree_node *node, *temp;
+	struct sptree_node *node;
 	struct sptree_root temp_root;
 
+	/* cut access to the tree */
 	temp_root.root = root->root;
 	rcu_assign_pointer(root->root, NULL);
 
-	// TODO: this is RCU dependent
-	synchronize_rcu();
-	// TODO: maybe implement ops->sync() ?
-
-	// post-order traversal and remove the nodes
-	sptree_for_each_po_safe(node, temp, &temp_root)
-		ops->free(node);
+	/* schedule all the nodes for deletion */
+	sptree_for_each(node, &temp_root)
+		ops->free_rcu(node);
 }
 
 
