@@ -42,7 +42,7 @@ static struct sptree_node *test_alloc(void)
 static void test_free(struct sptree_node *node)
 {
 	struct test_sptree_node *container;
-	container = container_of(node, struct test_sptree_node, node);
+	container = sptree_entry(node, struct test_sptree_node, node);
 
 	kfree(container);
 }
@@ -50,7 +50,7 @@ static void test_free(struct sptree_node *node)
 static void test_free_rcu(struct sptree_node *node)
 {
 	struct test_sptree_node *container;
-	container = container_of(node, struct test_sptree_node, node);
+	container = sptree_entry(node, struct test_sptree_node, node);
 
 	kfree_rcu(container, node.rcu);
 
@@ -59,7 +59,7 @@ static void test_free_rcu(struct sptree_node *node)
 static unsigned long test_get_key(struct sptree_node *node)
 {
 	struct test_sptree_node *container;
-	container = container_of(node, struct test_sptree_node, node);
+	container = sptree_entry(node, struct test_sptree_node, node);
 
 	return container->address;
 }
@@ -69,8 +69,8 @@ static void test_copy(struct sptree_node *to, struct sptree_node *from)
 	struct test_sptree_node *container_to;
 	struct test_sptree_node *container_from;
 
-	container_to = container_of(to, struct test_sptree_node, node);
-	container_from = container_of(from, struct test_sptree_node, node);
+	container_to = sptree_entry(to, struct test_sptree_node, node);
+	container_from = sptree_entry(from, struct test_sptree_node, node);
 
 	memcpy(container_to, container_from, sizeof(struct test_sptree_node));
 }
@@ -86,7 +86,6 @@ static struct sptree_ops test_ops = {
 static int prev_count = 0;
 static void validate_greater(struct sptree_root *root)
 {
-	struct sptree_node *node;
 	struct test_sptree_node *container;
 	unsigned long prev;
 	int count;
@@ -97,8 +96,7 @@ static void validate_greater(struct sptree_root *root)
 
 	prev = 0;
 	count = 0;
-	sptree_for_each(node, root) {
-		container = container_of(node, struct test_sptree_node, node);
+	sptree_for_each_entry(container, root, node) {
 		if (prev >= container->address) {
 			result = -EINVAL;
 			break;
@@ -421,16 +419,10 @@ static void *dump_gv_start(struct seq_file *s, loff_t *pos)
 static int dump_gv_show(struct seq_file *s, void *v)
 {
 	struct sptree_node *node = s->private;
-	struct sptree_node *parent;
-	struct sptree_node *left;
-	struct sptree_node *right;
-	struct test_sptree_node *container;
-
-	// warning: ISO C90 forbids mixed declarations and code
-	parent = node->parent;	// may contain L/R flags
-	left = node->left;
-	right = node->right;
-	container = container_of(node, struct test_sptree_node, node);
+	struct sptree_node *parent = node->parent;
+	struct sptree_node *left = node->left;
+	struct sptree_node *right = node->right;
+	struct test_sptree_node *container = sptree_entry(node, struct test_sptree_node, node);
 
 	seq_printf(s, "\tn%lx [label=\"%lx\\n%ld\", style=filled, fillcolor=%s]\n",
 		(unsigned long)node, container->address, (long)node->balance, "green");

@@ -162,8 +162,38 @@ extern void sptree_iter_next_po(struct sptree_iterator *iter);
 extern struct sptree_node *sptree_first(struct sptree_root *root);
 extern struct sptree_node *sptree_next(struct sptree_node *node);
 
+/**
+ * sptree_for_each - iterate in-order over nodes in a tree
+ * @pos:	the &struct sptree_node to use as a loop cursor.
+ * @root:	the root of the tree.
+ */
 #define sptree_for_each(pos, root)	\
 	for (pos = sptree_first(root); pos != NULL; pos = sptree_next(pos))
+
+/**
+ * sptree_entry - get the struct for this entry
+ * @ptr:	the &struct sptree_node pointer.
+ * @type:	the type of the struct this is embedded in.
+ * @member:	the name of the sptree_node within the struct.
+ */
+#define sptree_entry(ptr, type, member) \
+	container_of(ptr, type, member)
+
+#define sptree_entry_safe(ptr, type, member)	\
+	({ typeof(ptr) ____ptr = (ptr);		\
+	   ____ptr ? sptree_entry(____ptr, type, member) : NULL; \
+	})
+
+/**
+ * sptree_for_each_entry - iterate in-order over tree of given type
+ * @pos:	the type * to use as a loop cursor.
+ * @root:	the root of the tree.
+ * @member:	the name of the sptree_node within the struct.
+ */
+#define sptree_for_each_entry(pos, root, member)					\
+	for (pos = sptree_entry_safe(sptree_first(root), typeof(*(pos)), member);	\
+	     pos != NULL;								\
+	     pos = sptree_entry_safe(sptree_next(&(pos)->member), typeof(*(pos)), member))
 
 
 extern int sptree_init(struct sptree_root *root, struct sptree_ops *ops);
