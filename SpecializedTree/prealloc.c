@@ -65,6 +65,11 @@ static struct sptree_node *prealloc_first_postorder(struct sptree_node *node)
 }
 
 /* iterate post-order only on the preallocated branch */
+#define sptree_for_each_prealloc_po(pos, root)	\
+	for (pos = prealloc_first_postorder(root);	\
+	     pos;					\
+	     pos = prealloc_next_postorder(pos))
+
 #define sptree_for_each_prealloc_po_safe(pos, n, root)		\
 	for (pos = prealloc_first_postorder(root);		\
 	     pos && ({ n = prealloc_next_postorder(pos); 1; });	\
@@ -94,6 +99,64 @@ static void _delete_prealloc(struct sptree_ctxt *ctxt, struct sptree_node *preal
 	}
 }
 
+
+/* reverse-in-order iteration on the new branch */
+static struct sptree_node *prealloc_rightmost_rin(struct sptree_node *node)
+{
+	ASSERT(is_new_branch(node));
+
+	/* descend along the right branch */
+	for (;;) {
+		if (node->right && is_new_branch(node->right))
+			node = node->right;
+		else
+			return node;
+	}
+}
+
+static struct sptree_node *prealloc_successor_rin(struct sptree_node *node)
+{
+	struct sptree_node *parent;
+
+	/* ascend along the left branch */
+	for (;;) {
+		parent = strip_flags(node->parent);
+		if (is_root(parent) || !is_new_branch(parent))
+			return NULL;
+
+		/* is right child */
+		if (!is_left_child(node->parent))
+			return parent;
+
+		node = parent;
+	}
+}
+
+/* the preallocated branch/subtree doesn't have a root, just a root node */
+static struct sptree_node *prealloc_first_rin(struct sptree_node *node)
+{
+	if (!node)
+		return NULL;
+
+	ASSERT(is_new_branch(node));
+
+	return prealloc_rightmost_rin(node);
+}
+
+struct sptree_node *prealloc_next_rin(struct sptree_node *node)
+{
+	/* reverse-in-order RNL -> next is left */
+	if (node->left && is_new_branch(node->left))
+		return prealloc_rightmost_rin(node->left);
+
+	return prealloc_successor_rin(node);
+}
+
+#define sptree_for_each_prealloc_rin(pos, root)	\
+	for (pos = prealloc_first_rin(root);	\
+	     pos != NULL;			\
+	     pos = prealloc_next_rin(pos))	\
+
 /**
  * prealloc_connect() - insert the new branch in a tree
  * @pbranch:	The place where new branch will be connected
@@ -112,75 +175,30 @@ static void _delete_prealloc(struct sptree_ctxt *ctxt, struct sptree_node *preal
  */
 static void prealloc_connect(struct sptree_node **pbranch, struct sptree_node *branch)
 {
-	struct sptree_iterator io;
-	struct sptree_node *next;
+	struct sptree_node *node;
 
 	if (branch == NULL)
 		pr_debug("%s: at (EMPTY)\n", __func__);
 	else
 		pr_debug("%s: at "NODE_FMT"\n", __func__, NODE_ARG(branch));
 
-	/* reverse-post-order traversal of links */
-	io.node = branch;
-	io.state = ITER_UP;
+	sptree_for_each_prealloc_rin(node, branch) {
+		ASSERT(is_new_branch(node));
 
-	while (likely(io.node)) {
-		switch (io.state)
-		{
-		case ITER_UP:
-			next = io.node->right;			// move to right node
-			if (next) {
-				if (is_new_branch(next)) {
-					io.node = next;		// continue the right path
-					break;			// switch
-				}
-				else {
-					rcu_assign_pointer(next->parent, make_right(io.node));
-					io.state = ITER_RIGHT;
-					// fallback
-				}
-			}
-
-		case ITER_RIGHT:
-			next = io.node->left;			// move to the left node
-			if (next) {
-				if (is_new_branch(next)) {
-					io.node = next;
-					io.state = ITER_UP;	// another subtree
-					break;			// switch
-				}
-				else {
-					rcu_assign_pointer(next->parent, make_left(io.node));
-					io.state = ITER_LEFT;
-					// fallback
-				}
-			}
-
-		case ITER_LEFT:
-			next = strip_flags(io.node->parent);	// move to parent
-			if (next && is_new_branch(next)) {
-				if (!is_left_child(io.node->parent))
-					io.state = ITER_RIGHT;
-			}
-			else {
-				io.state = ITER_DONE;		// done!
-				next = NULL;			// out of new branch
-			}
-
-			io.node->new_branch = 0;
-
-			io.node = next;				// finally move to parent
-			break;					// switch
-
-		default:
-			pr_err("%s: unhandled iterator state\n", __func__);
-			BUG();
-			return;
-		}
+		if (node->right && !is_new_branch(node->right))
+			rcu_assign_pointer(node->right->parent, make_right(node));
+		if (node->left && !is_new_branch(node->left))
+			rcu_assign_pointer(node->left->parent, make_left(node));
 	}
 
-	/* ...or degenerate case (empty new branch) */
-	rcu_assign_pointer(*pbranch, branch);				// finally link root
+	/* clear the new branch flag post-order, otherwise it breaks iteration */
+	sptree_for_each_prealloc_po(node, branch) {
+		ASSERT(is_new_branch(node));
+		node->new_branch = 0;
+	}
+
+	/* finally link root / degenerate case (empty new branch) */
+	rcu_assign_pointer(*pbranch, branch);
 }
 
 /*
