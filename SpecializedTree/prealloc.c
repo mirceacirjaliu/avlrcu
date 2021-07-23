@@ -59,7 +59,10 @@ static struct sptree_node *prealloc_next_postorder(struct sptree_node *node)
 /* the preallocated branch/subtree doesn't have a root, just a root node */
 static struct sptree_node *prealloc_first_postorder(struct sptree_node *node)
 {
-	ASSERT(node && is_new_branch(node));
+	if (!node)
+		return NULL;
+
+	ASSERT(is_new_branch(node));
 
 	return prealloc_left_deepest(node);
 }
