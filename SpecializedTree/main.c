@@ -14,6 +14,7 @@
 #include <linux/stat.h>
 #include <linux/uaccess.h>
 #include <linux/spinlock.h>
+#include <linux/fault-inject.h>
 
 #include "main.h"
 
@@ -27,10 +28,19 @@ static struct task_struct *validator;
 // access files
 static struct dentry *debugfs_dir;
 
+#ifdef CONFIG_FAULT_INJECTION
+DECLARE_FAULT_ATTR(sptree_fault_attr);
+#endif /* CONFIG_FAULT_INJECTION */
 
 static struct sptree_node *test_alloc(void)
 {
 	struct test_sptree_node *container;
+
+#ifdef CONFIG_FAULT_INJECTION
+	/* trigger allocation failure */
+	if (should_fail(&sptree_fault_attr, sizeof(struct test_sptree_node)))
+		return NULL;
+#endif /* CONFIG_FAULT_INJECTION */
 
 	container = kzalloc(sizeof(struct test_sptree_node), GFP_ATOMIC);
 	if (!container)
@@ -676,6 +686,12 @@ static int __init sptree_debugfs_init(void)
 	result = debugfs_create_file("dump_po", S_IRUGO, debugfs_dir, NULL, &dump_po_map_ops);
 	if (IS_ERR(result))
 		goto error;
+
+#ifdef CONFIG_FAULT_INJECTION
+	result = fault_create_debugfs_attr("fail_sptree", debugfs_dir, &sptree_fault_attr);
+	if (IS_ERR(result))
+		goto error;
+#endif /* CONFIG_FAULT_INJECTION */
 
 	return 0;
 

@@ -21,74 +21,76 @@ static void sptree_ctxt_init(struct sptree_ctxt *ctxt, struct sptree_root *root)
 	ctxt->diff = 0;
 }
 
+
+static struct sptree_node *prealloc_left_deepest(struct sptree_node *node)
+{
+	ASSERT(is_new_branch(node));
+
+	for (;;) {
+		if (node->left && is_new_branch(node->left))
+			node = node->left;
+		else if (node->right && is_new_branch(node->right))
+			node = node->right;
+		else
+			return node;
+	}
+}
+
+static struct sptree_node *prealloc_next_postorder(struct sptree_node *node)
+{
+	struct sptree_node *parent;
+
+	/* iteration macro does this */
+	if (!node)
+		return NULL;
+
+	/* NULL if root, otherwise node on the old/new branch */
+	parent = get_parent(node);
+	if (is_root(parent) || !is_new_branch(parent))
+		return NULL;
+
+	/* LRN, next is right sibling, otherwise go to parent */
+	if (is_left_child(node->parent) && parent->right && is_new_branch(parent->right))
+		return prealloc_left_deepest(parent->right);
+	else
+		return parent;
+}
+
+/* the preallocated branch/subtree doesn't have a root, just a root node */
+static struct sptree_node *prealloc_first_postorder(struct sptree_node *node)
+{
+	ASSERT(node && is_new_branch(node));
+
+	return prealloc_left_deepest(node);
+}
+
+/* iterate post-order only on the preallocated branch */
+#define sptree_for_each_prealloc_po_safe(pos, n, root)		\
+	for (pos = prealloc_first_postorder(root);		\
+	     pos && ({ n = prealloc_next_postorder(pos); 1; });	\
+	     pos = prealloc_next_postorder(n))
+
 /*
  * _delete_prealloc() - delete prealloc branch/subtree in case of failure
  * @ctxt:		AVL operations environment
- * @prealloc:		The root of the new branch
+ * @prealloc:		The root node of the preallocated branch
  *
  * The prealloc branch is not yet inserted into the tree.
  * Will do a post-order walk and delete the nodes.
  */
 static void _delete_prealloc(struct sptree_ctxt *ctxt, struct sptree_node *prealloc)
 {
-	struct sptree_iterator iter;
-	struct sptree_node *next;
 	struct sptree_ops *ops = ctxt->root->ops;
+	struct sptree_node *node, *temp;
 
 	pr_debug("%s: start at "NODE_FMT"\n", __func__, NODE_ARG(prealloc));
 	ASSERT(prealloc);
 	ASSERT(is_new_branch(prealloc));
 	ASSERT(is_root(get_parent(prealloc)) || !is_new_branch(get_parent(prealloc)));
 
-	iter.node = prealloc;
-	iter.state = ITER_UP;
-
-	while (iter.node) {
-		switch (iter.state) {
-		case ITER_UP:
-			next = iter.node->left;			// move to left node
-			if (next && is_new_branch(next)) {
-				iter.node = next;
-				break;				// switch
-			}
-			else
-				iter.state = ITER_LEFT;		// just handled left
-				// fallback
-
-		case ITER_LEFT:
-			next = iter.node->right;		// move to right node
-			if (next && is_new_branch(next)) {
-				iter.node = next;
-				iter.state = ITER_UP;
-				break;				// switch
-			}
-			else
-				iter.state = ITER_RIGHT;	// just handled right
-				// fallback
-
-		case ITER_RIGHT:
-			next = get_parent(iter.node);		// move to parent
-			if (next && is_new_branch(next)) {
-				if (is_left_child(iter.node->parent))
-					iter.state = ITER_LEFT;
-			}
-			else {
-				iter.node = NULL;		// iteration finished
-				iter.state = ITER_DONE;
-			}
-
-			ops->free(iter.node);
-
-			iter.node = next;
-			break;
-
-		default:
-			pr_err("%s: unhandled iterator state\n", __func__);
-			BUG();
-			iter.node = NULL;
-			iter.state = ITER_DONE;
-			break;
-		}
+	sptree_for_each_prealloc_po_safe(node, temp, prealloc) {
+		ASSERT(is_new_branch(node));
+		ops->free(node);
 	}
 }
 
