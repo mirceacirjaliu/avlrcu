@@ -961,40 +961,33 @@ static struct sptree_node *prealloc_rlr(struct sptree_ctxt *ctxt, struct sptree_
 
 /*
  * poor_balance_depth() - count the number of moves needed to rebalance a poorly balanced subtree
- * @target - first poorly balanced node (root of the subtree)
+ * @node - first poorly balanced node (root of the subtree)
  *
  * A poorly balanced subtree can be recursive. A single rebalance will not be enough.
  * This function counts the number of recursive rebalances needed to rebalance this subtree.
  */
-static int poor_balance_depth(struct sptree_node *target)
+static int poor_balance_depth(struct sptree_node *node)
 {
-	struct sptree_iterator iter;
-	int count = 0;
+	int count = 1;
+	int expected = node->balance;
 
-	pr_debug("%s: at "NODE_FMT"\n", __func__, NODE_ARG(target));
-	ASSERT(target->balance == -1 || target->balance == 1);
-	ASSERT(!is_leaf(target));	// kinda useless assert
+	pr_debug("%s: at "NODE_FMT"\n", __func__, NODE_ARG(node));
+	ASSERT(node->balance == -1 || node->balance == 1);
+	ASSERT(!is_leaf(node));	// kinda useless assert
 
-	iter.node = target;
-	iter.state = target->balance == -1 ? ITER_RIGHT : ITER_LEFT;
+	for (;;) {
+		/* advance to child -> child will exist */
+		expected = -expected;
+		if (node->balance == -1)
+			node = node->left;
+		else // node->balance == 1
+			node = node->right;
 
-	while (!is_leaf(iter.node)) {
-		/* check condition */
-		if ((iter.state == ITER_LEFT && iter.node->balance == 1) ||
-			(iter.state == ITER_RIGHT && iter.node->balance == -1))
+		/* check current balance if +-1 */
+		if (node->balance == expected)
 			count++;
 		else
 			break;
-
-		/* go down the branch */
-		if (iter.state == ITER_LEFT) {
-			iter.state = ITER_RIGHT;
-			iter.node = iter.node->right;
-		}
-		else {
-			iter.state = ITER_LEFT;
-			iter.node = iter.node->left;
-		}
 	}
 
 	return count;
@@ -1003,7 +996,7 @@ static int poor_balance_depth(struct sptree_node *target)
 /*
  * prealloc_rebalance() - recursively rebalance a poorly balanced subtree
  * @ctxt - AVL operations environment
- * @target - root of the poorly balanced subtree
+ * @target - first poorly balanced node (root of the subtree)
  *
  * A poorly balanced subtree can be recursive. A single rebalance will not be enough.
  * This function will recursvely rebalance the poorly balanced branch.
@@ -1012,91 +1005,56 @@ static int poor_balance_depth(struct sptree_node *target)
  */
 static struct sptree_node *prealloc_rebalance(struct sptree_ctxt *ctxt, struct sptree_node *target)
 {
-	struct sptree_iterator iter;
+	struct sptree_node *node = target;
 	struct sptree_node *child;
 	bool stop = false;
+	int expected = node->balance;
 
 	pr_debug("%s: at "NODE_FMT"\n", __func__, NODE_ARG(target));
 	ASSERT(is_new_branch(target));
 	ASSERT(target->balance == -1 || target->balance == 1);
 
-	iter.node = target;
-	iter.state = (target->balance == 1) ? ITER_LEFT : ITER_RIGHT;
+	/* descend along poorly balanced branch, starting with the first node... */
+	while (node->balance == expected) {
+		int which_child = (expected == -1) ? LEFT_CHILD : RIGHT_CHILD;
 
-	/* descend along poorly balanced branch */
-	while (true) {
-		if (iter.state == ITER_LEFT && iter.node->balance == 1) {
-			/* prealloc child anyway, it's either used for rotation or poorly balanced */
-			child = prealloc_child(ctxt, iter.node, RIGHT_CHILD);
-			if (!child)
-				return NULL;
+		/* prealloc child anyway, it's either used for rotation or poorly balanced */
+		child = prealloc_child(ctxt, node, which_child);
+		if (!child)
+			return NULL;
 
-			/* still a poorly balanced child ? */
-			if (child->balance == -1) {
-				iter.node = child;
-				iter.state = ITER_RIGHT;
-				continue;	/* next poorly balanced node */
-			}
-			else
-				break;		/* bottom poorly balanced node */
-		}
+		expected = -expected;
 
-		if (iter.state == ITER_RIGHT && iter.node->balance == -1) {
-			/* prealloc child anyway, it's either used for rotation or poorly balanced */
-			child = prealloc_child(ctxt, iter.node, LEFT_CHILD);
-			if (!child)
-				return NULL;
-
-			/* still a poorly balanced child ? */
-			if (child->balance == 1) {
-				iter.node = child;
-				iter.state = ITER_LEFT;
-				continue;	/* next poorly balanced node */
-			}
-			else
-				break;		/* bottom poorly balanced node */
-		}
-
-		/* shouldn't reach this place */
-		pr_err("%s: invalid case at "NODE_FMT"\n", __func__, NODE_ARG(iter.node));
-		BUG();
+		/* this will be the left or the right child */
+		/* the child needs to have balance opposed to the parent, otherwise stop at parent */
+		if (child->balance == expected)
+			node = child;
 	}
 
 	/* we are at the bottom poorly balanced node */
-	ASSERT(is_new_branch(iter.node));
+	ASSERT(is_new_branch(node));	/* poorly balanced parent */
+	ASSERT(is_new_branch(child));	/* child that broke the loop */
 
 	/* ascend & rebalance the tree */
 	do {
-		if (iter.node == target)
+		/* last rotation... */
+		if (node == target)
 			stop = true;
 
-		if (iter.state == ITER_LEFT) {
-			ASSERT(iter.node->balance == 1);
+		if (node->balance == 1)
+			node = prealloc_rol(ctxt, node);
+		else
+			node = prealloc_ror(ctxt, node);
 
-			iter.node = prealloc_rol(ctxt, iter.node);
-			if (!iter.node)
-				return NULL;
+		if (!node)
+			return NULL;
 
-			if (!stop) {
-				iter.node = get_parent(iter.node);
-				iter.state = ITER_RIGHT;
-			}
-		}
-		else {
-			ASSERT(iter.node->balance == -1);
-
-			iter.node = prealloc_ror(ctxt, iter.node);
-			if (!iter.node)
-				return NULL;
-
-			if (!stop) {
-				iter.node = get_parent(iter.node);
-				iter.state = ITER_LEFT;
-			}
-		}
+		/* ...otherwise advance to parent */
+		if (!stop)
+			node = get_parent(node);
 	} while (!stop);
 
-	return iter.node;
+	return node;
 }
 
 static struct sptree_node *prealloc_reverse_rrl(struct sptree_ctxt *ctxt, struct sptree_node *target)
