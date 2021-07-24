@@ -119,30 +119,6 @@ static inline char node_balancing(const struct sptree_node *node)
 #define NODE_FMT "(%lx, %ld)"
 #define NODE_ARG(__node) (long)&(__node), (long)(__node)->balance
 
-
-/*
- * The state tells the direction the iteration came from.
- * We enter a node from parent (up).
- * After entering a node, we first look left.
- * After handling left, we handle the node (in-order).
- * After handling the node, we look right.
- * After handling right, we return to parent.
- * (Returning to parent can be done from the left/right child.)
- */
-enum sptree_iter_state {
-	ITER_UP,
-	ITER_LEFT,
-	ITER_HANDLED,
-	ITER_RIGHT,
-	ITER_DONE
-};
-
-struct sptree_iterator {
-	struct sptree_node *node;
-	enum sptree_iter_state state;
-};
-
-
 /**
  * sptree_entry - get the struct for this entry
  * @ptr:	the &struct sptree_node pointer.
