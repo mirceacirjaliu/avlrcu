@@ -206,7 +206,7 @@ static void prealloc_connect(struct sptree_node **pbranch, struct sptree_node *b
 
 /*
  * prealloc_remove_old() - remove (RCU) nodes replaced by the new branch
- * @old:	The chain of old nodes.
+ * @ctxt:	AVL operations environment (contains ops & the old nodes chain).
  *
  * All nodes in the old chain will be passed to RCU for deletion.
  */
@@ -220,6 +220,29 @@ static void prealloc_remove_old(struct sptree_ctxt *ctxt)
 	llist_for_each_entry_safe(old, temp, node, old)
 		ops->free_rcu(old);
 }
+
+/*
+ * prealloc_remove_old() - remove (RCU) nodes replaced by the new branch
+ * @ctxt:	AVL operations environment (contains ops & the old nodes chain).
+ *
+ * All nodes in the old chain will be passed to RCU for deletion.
+ * This is the version used in the delete function. The node matching the key
+ * will be the first one that is replaced by the unwind logic and will be found
+ * at the end of the old chain. Skip this node, it will be handed to the user.
+ */
+static void prealloc_remove_old_delete(struct sptree_ctxt *ctxt)
+{
+	struct sptree_ops *ops = ctxt->root->ops;
+	struct llist_node *node;
+	struct sptree_node *old, *temp;
+
+	node = __llist_del_all(&ctxt->old);
+	node = llist_reverse_order(node);
+	node = node->next;
+	llist_for_each_entry_safe(old, temp, node, old)
+		ops->free_rcu(old);
+}
+
 
 /*
  * prealloc_replace() - replicates a node on the new branch
@@ -1565,12 +1588,16 @@ static struct sptree_node *unwind_delete_retrace(struct sptree_ctxt *ctxt, struc
  * @root - root of the tree
  * @key - key of the node to delete
  *
- * Returns:	0 - success
+ * Returns:	the extracted node on success
  *		-ENXIO - node was not found
  *		-ENOMEM - allocations failed
+ *
  * On error, the tree is not modified.
+ * Returns the node corresponding to the key, after extracting it from the tree.
+ * The node may still be used by readers, so it's the duty of the user to free it
+ * after waiting for a grace period to elapse.
  */
-int prealloc_delete(struct sptree_root *root, unsigned long key)
+struct sptree_node *prealloc_delete(struct sptree_root *root, unsigned long key)
 {
 	struct sptree_node *target, *parent, **pbranch;
 	struct sptree_node *prealloc;
@@ -1578,7 +1605,7 @@ int prealloc_delete(struct sptree_root *root, unsigned long key)
 
 	target = search(root, key);
 	if (!target)
-		return -ENXIO;
+		return ERR_PTR(-ENXIO);
 
 	// parent may contain L/R flags or NULL
 	parent = target->parent;
@@ -1588,7 +1615,7 @@ int prealloc_delete(struct sptree_root *root, unsigned long key)
 	/* may return NULL as a valid value !!! */
 	prealloc = unwind_delete_retrace(&ctxt, target);
 	if (IS_ERR(prealloc))
-		return PTR_ERR(prealloc);
+		return prealloc;
 
 	/* new branch may climb after retrace & take over the old parent */
 	if (prealloc)
@@ -1600,10 +1627,10 @@ int prealloc_delete(struct sptree_root *root, unsigned long key)
 
 	// this will remove the replaced nodes
 	if (!llist_empty(&ctxt.old))
-		prealloc_remove_old(&ctxt);
+		prealloc_remove_old_delete(&ctxt);
 
 	// TODO: remove once code stable
 	validate_avl_balancing(root);
 
-	return 0;
+	return target;
 }

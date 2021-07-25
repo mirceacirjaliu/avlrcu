@@ -188,7 +188,7 @@ extern int sptree_init(struct sptree_root *root, struct sptree_ops *ops);
 /* write-side calls, must be protected by a lock */
 extern void sptree_free(struct sptree_root *root);
 extern int prealloc_insert(struct sptree_root *root, struct sptree_node *node);
-extern int prealloc_delete(struct sptree_root *root, unsigned long key);
+extern struct sptree_node *prealloc_delete(struct sptree_root *root, unsigned long key);
 
 /* test functions, also write-side calls, must be protected by a lock */
 extern int prealloc_unwind(struct sptree_root *root, unsigned long key);

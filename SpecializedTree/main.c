@@ -190,6 +190,8 @@ static ssize_t prealloc_insert_map(struct file *file, const char __user *data, s
 static ssize_t prealloc_delete_map(struct file *file, const char __user *data, size_t count, loff_t *offs)
 {
 	unsigned long value;
+	struct sptree_node *node;
+	struct test_sptree_node *container;
 	int result;
 
 	result = kstrtoul_from_user(data, count, 16, &value);
@@ -207,9 +209,20 @@ static ssize_t prealloc_delete_map(struct file *file, const char __user *data, s
 	/* these have to match with the allocation functions */
 	spin_lock(&lock);
 
-	result = prealloc_delete(&sptree_range, value);
+	node = prealloc_delete(&sptree_range, value);
 
 	spin_unlock(&lock);
+
+	if (node) {
+		container = sptree_entry(node, struct test_sptree_node, node);
+		kfree_rcu(container, node.rcu);
+		// or
+		//synchronize_rcu();
+		// cleanup payload of container...
+		//kfree(container);
+	}
+	else
+		result = (int)PTR_ERR(node);
 
 	if (result == 0)
 		pr_debug("%s: success\n", __func__);
