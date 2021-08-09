@@ -123,7 +123,7 @@ static struct sptree_node *prealloc_successor_rin(struct sptree_node *node)
 
 	/* ascend along the left branch */
 	for (;;) {
-		parent = strip_flags(node->parent);
+		parent = get_parent(node);
 		if (is_root(parent) || !is_new_branch(parent))
 			return NULL;
 
@@ -349,11 +349,19 @@ static struct sptree_node *prealloc_child(struct sptree_ctxt *ctxt, struct sptre
 	return new_child;
 }
 
+/*
+ * Difference between retrace rotations & generic rotations:
+ * - retrace rotations work on a subset of the cases...
+ * - retrace rotations always work bottom-up (the parent is never part of the new branch).
+ * - the diff in height of +-1 is encoded in the control flow (not in the subtree root).
+ * - retrace rotations always attempt to reduce the height of the subtree
+ */
 
 /* return new root to be set as top of branch */
 static struct sptree_node *prealloc_retrace_ror(struct sptree_node *root)
 {
 	struct sptree_node *pivot = root->left;
+	struct sptree_node *t2 = pivot->right;
 	struct sptree_node *new_root = pivot;
 	struct sptree_node *new_pivot = root;
 
@@ -363,9 +371,9 @@ static struct sptree_node *prealloc_retrace_ror(struct sptree_node *root)
 	ASSERT(is_new_branch(pivot));
 
 	// redistribute t2
-	new_pivot->left = pivot->right;
-	if (pivot->right && is_new_branch(pivot->right))
-		pivot->right->parent = make_left(new_pivot);
+	new_pivot->left = t2;
+	if (t2 && is_new_branch(t2))
+		t2->parent = make_left(new_pivot);
 
 	// relink nodes
 	new_root->parent = root->parent;
@@ -393,6 +401,8 @@ static struct sptree_node *prealloc_retrace_rlr(struct sptree_node *root)
 	// root = X
 	struct sptree_node *left = root->left;		// Z
 	struct sptree_node *right = left->right;	// Y
+	struct sptree_node *t2 = right->left;
+	struct sptree_node *t3 = right->right;
 	struct sptree_node *new_root = right;		// new Y
 	struct sptree_node *new_left = left;		// new Z
 	struct sptree_node *new_right = root;		// new X
@@ -403,13 +413,13 @@ static struct sptree_node *prealloc_retrace_rlr(struct sptree_node *root)
 	ASSERT(is_new_branch(right));
 
 	// redistribute t2, t3
-	new_left->right = right->left;
-	if (right->left && is_new_branch(right->left))
-		right->left->parent = make_right(new_left);
+	new_left->right = t2;
+	if (t2 && is_new_branch(t2))
+		t2->parent = make_right(new_left);
 
-	new_right->left = right->right;
-	if (right->right && is_new_branch(right->right))
-		right->right->parent = make_left(new_right);
+	new_right->left = t3;
+	if (t3 && is_new_branch(t3))
+		t3->parent = make_left(new_right);
 
 	// relink nodes
 	new_root->parent = root->parent;
@@ -443,6 +453,7 @@ static struct sptree_node *prealloc_retrace_rlr(struct sptree_node *root)
 static struct sptree_node *prealloc_retrace_rol(struct sptree_node *root)
 {
 	struct sptree_node *pivot = root->right;
+	struct sptree_node *t2 = pivot->left;
 	struct sptree_node *new_root = pivot;
 	struct sptree_node *new_pivot = root;
 
@@ -452,9 +463,9 @@ static struct sptree_node *prealloc_retrace_rol(struct sptree_node *root)
 	ASSERT(is_new_branch(pivot));
 
 	// redistribute t2
-	new_pivot->right = pivot->left;
-	if (pivot->left && is_new_branch(pivot->left))
-		pivot->left->parent = make_right(new_pivot);
+	new_pivot->right = t2;
+	if (t2 && is_new_branch(t2))
+		t2->parent = make_right(new_pivot);
 
 	// relink nodes
 	new_root->parent = root->parent;
@@ -483,6 +494,8 @@ static struct sptree_node *prealloc_retrace_rrl(struct sptree_node *root)
 	// root = X
 	struct sptree_node *right = root->right;	// Z
 	struct sptree_node *left = right->left;		// Y
+	struct sptree_node *t2 = left->left;
+	struct sptree_node *t3 = left->right;
 	struct sptree_node *new_root = left;		// new Y
 	struct sptree_node *new_left = root;		// new X
 	struct sptree_node *new_right = right;		// new Z
@@ -493,13 +506,13 @@ static struct sptree_node *prealloc_retrace_rrl(struct sptree_node *root)
 	ASSERT(is_new_branch(left));
 
 	// redistribute t2, t3
-	new_left->right = left->left;
-	if (left->left && is_new_branch(left->left))
-		left->left->parent = make_right(new_left);
+	new_left->right = t2;
+	if (t2 && is_new_branch(t2))
+		t2->parent = make_right(new_left);
 
-	new_right->left = left->right;
-	if (left->right && is_new_branch(left->right))
-		left->right->parent = make_left(new_right);
+	new_right->left = t3;
+	if (t3 && is_new_branch(t3))
+		t3->parent = make_left(new_right);
 
 	// relink nodes
 	new_root->parent = root->parent;
@@ -855,7 +868,7 @@ static struct sptree_node *prealloc_rol(struct sptree_ctxt *ctxt, struct sptree_
 		t2->parent = make_right(new_pivot);
 
 	/* relink parents */
-	parent = strip_flags(target->parent);
+	parent = get_parent(target);
 	ptarget = get_pnode(ctxt->root, target->parent);
 
 	new_root->parent = target->parent;
@@ -906,7 +919,7 @@ static struct sptree_node *prealloc_ror(struct sptree_ctxt *ctxt, struct sptree_
 		t2->parent = make_left(new_pivot);
 
 	/* relink parents */
-	parent = strip_flags(target->parent);
+	parent = get_parent(target);
 	ptarget = get_pnode(ctxt->root, target->parent);
 
 	new_root->parent = target->parent;
@@ -1286,7 +1299,7 @@ static struct sptree_node *_prealloc_unwind(struct sptree_ctxt *ctxt, struct spt
 		target = prealloc;
 
 		/* each unwinding step must start with a normal balance */
-		BUG_ON(target->balance < -1 || target->balance > 1);
+		ASSERT(is_avl(target));
 
 		switch (target->balance) {
 		case -1:

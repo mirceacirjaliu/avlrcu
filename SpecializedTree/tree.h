@@ -41,6 +41,11 @@ struct sptree_ctxt {
 	int diff;
 };
 
+static inline bool is_avl(struct sptree_node *node)
+{
+	return node->balance >= -1 && node->balance <= 1;
+}
+
 extern void validate_avl_balancing(struct sptree_root *root);
 
 // flags set on parent pointer to fast determine on which side of the parent we are
