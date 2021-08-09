@@ -823,34 +823,31 @@ static void prealloc_propagate_change(struct sptree_ctxt *ctxt, struct sptree_no
 	ctxt->diff += diff;
 }
 
-/* generic rotation for unwind & fix steps */
+/*
+ * prealloc_rol() - generic ROL for the unwind & fix steps
+ * @ctxt	AVL operations environment
+ * @target	root of the subtree to be rotated
+ *
+ * Both the target and the pivot must be part of the new branch.
+ * Returns the new root of the subtree. Does not fail.
+ */
 static struct sptree_node *prealloc_rol(struct sptree_ctxt *ctxt, struct sptree_node *target)
 {
 	struct sptree_node *parent, **ptarget;
 	struct sptree_node *pivot = target->right;
-	struct sptree_node *new_root, *new_pivot;
-	struct sptree_node *t2;
+	struct sptree_node *t2 = pivot->left;
+	struct sptree_node *new_root = pivot;
+	struct sptree_node *new_pivot = target;
 	struct balance_factors new_balance;
 	int diff_height;
 
 	pr_debug("%s: at "NODE_FMT"\n", __func__, NODE_ARG(target));
 	ASSERT(is_new_branch(target));
-
-	/* copy pivot if not already part of the new branch */
-	if (!is_new_branch(pivot)) {
-		pivot = prealloc_child(ctxt, target, RIGHT_CHILD);
-		if (!pivot)
-			return NULL;					/* only error output */
-	}
+	ASSERT(is_new_branch(pivot));
 
 	/* compute new balance factors & tree height diff after rotation */
 	diff_height = rol_height_diff(target->balance, pivot->balance);
 	new_balance = rol_new_balance(target->balance, pivot->balance);
-
-	/* make the algorithm easier to read */
-	t2 = pivot->left;
-	new_root = pivot;
-	new_pivot = target;
 
 	/* redistribute t2 */
 	new_pivot->right = t2;
@@ -877,33 +874,31 @@ static struct sptree_node *prealloc_rol(struct sptree_ctxt *ctxt, struct sptree_
 	return new_root;
 }
 
+/*
+ * prealloc_ror() - generic ROR for the unwind & fix steps
+ * @ctxt	AVL operations environment
+ * @target	root of the subtree to be rotated
+ *
+ * Both the target and the pivot must be part of the new branch.
+ * Returns the new root of the subtree. Does not fail.
+ */
 static struct sptree_node *prealloc_ror(struct sptree_ctxt *ctxt, struct sptree_node *target)
 {
 	struct sptree_node *parent, **ptarget;
 	struct sptree_node *pivot = target->left;
-	struct sptree_node *new_root, *new_pivot;
-	struct sptree_node *t2;
+	struct sptree_node *t2 = pivot->right;
+	struct sptree_node *new_root = pivot;
+	struct sptree_node *new_pivot = target;
 	struct balance_factors new_balance;
 	int diff_height;
 
 	pr_debug("%s: at "NODE_FMT"\n", __func__, NODE_ARG(target));
 	ASSERT(is_new_branch(target));
-
-	/* copy pivot if not already part of the new branch */
-	if (!is_new_branch(pivot)) {
-		pivot = prealloc_child(ctxt, target, LEFT_CHILD);
-		if (!pivot)
-			return NULL;					/* only error output */
-	}
+	ASSERT(is_new_branch(pivot));
 
 	/* compute new balance factors & tree height diff after rotation */
 	diff_height = ror_height_diff(target->balance, pivot->balance);
 	new_balance = ror_new_balance(target->balance, pivot->balance);
-
-	/* make the algorithm easier to read */
-	t2 = pivot->right;
-	new_root = pivot;
-	new_pivot = target;
 
 	/* redistribute t2 */
 	new_pivot->left = t2;
@@ -930,54 +925,44 @@ static struct sptree_node *prealloc_ror(struct sptree_ctxt *ctxt, struct sptree_
 	return new_root;
 }
 
+/*
+ * prealloc_rrl() - generic RRL for the unwind & fix steps
+ * @ctxt	AVL operations environment
+ * @target	root of the subtree to be rotated
+ *
+ * Both the target and the pivot must be part of the new branch.
+ * Returns the new root of the subtree. Does not fail.
+ */
 static struct sptree_node *prealloc_rrl(struct sptree_ctxt *ctxt, struct sptree_node *target)
 {
 	struct sptree_node *pivot = target->right;
 
 	pr_debug("%s: at "NODE_FMT"\n", __func__, NODE_ARG(target));
 	ASSERT(is_new_branch(target));
+	ASSERT(is_new_branch(pivot));
 
-	/* copy pivot if not already part of the new branch */
-	if (!is_new_branch(pivot)) {
-		pivot = prealloc_child(ctxt, target, RIGHT_CHILD);
-		if (!pivot)
-			return NULL;
-	}
-
-	/* first rotation */
-	pivot = prealloc_ror(ctxt, pivot);
-	if (!pivot)
-		return NULL;
-
-	/* second rotation */
-	target = prealloc_rol(ctxt, target);
-
-	return target;
+	prealloc_ror(ctxt, pivot);
+	return prealloc_rol(ctxt, target);
 }
 
+/*
+ * prealloc_rlr() - generic RLR for the unwind & fix steps
+ * @ctxt	AVL operations environment
+ * @target	root of the subtree to be rotated
+ *
+ * Both the target and the pivot must be part of the new branch.
+ * Returns the new root of the subtree. Does not fail.
+ */
 static struct sptree_node *prealloc_rlr(struct sptree_ctxt *ctxt, struct sptree_node *target)
 {
 	struct sptree_node *pivot = target->left;
 
 	pr_debug("%s: at "NODE_FMT"\n", __func__, NODE_ARG(target));
 	ASSERT(is_new_branch(target));
+	ASSERT(is_new_branch(pivot));
 
-	/* copy pivot if not already part of the new branch */
-	if (!is_new_branch(pivot)) {
-		pivot = prealloc_child(ctxt, target, LEFT_CHILD);
-		if (!pivot)
-			return NULL;
-	}
-
-	/* first rotation */
-	pivot = prealloc_rol(ctxt, pivot);
-	if (!pivot)
-		return NULL;
-
-	/* second rotation */
-	target = prealloc_ror(ctxt, target);
-
-	return target;
+	prealloc_rol(ctxt, pivot);
+	return prealloc_ror(ctxt, target);
 }
 
 
@@ -1068,9 +1053,6 @@ static struct sptree_node *prealloc_rebalance(struct sptree_ctxt *ctxt, struct s
 		else
 			node = prealloc_ror(ctxt, node);
 
-		if (!node)
-			return NULL;
-
 		/* ...otherwise advance to parent */
 		if (!stop)
 			node = get_parent(node);
@@ -1079,6 +1061,14 @@ static struct sptree_node *prealloc_rebalance(struct sptree_ctxt *ctxt, struct s
 	return node;
 }
 
+/*
+ * prealloc_reverse_rrl() - reverse RRL for the unwind step
+ * @ctxt	AVL operations environment
+ * @target	root of the subtree to be rotated
+ *
+ * All the nodes subject to rotations must be part of the new branch.
+ * Returns the bottom of the rotated nodes. Does not fail.
+ */
 static struct sptree_node *prealloc_reverse_rrl(struct sptree_ctxt *ctxt, struct sptree_node *target)
 {
 	struct sptree_node *subtree_root;
@@ -1087,19 +1077,23 @@ static struct sptree_node *prealloc_reverse_rrl(struct sptree_ctxt *ctxt, struct
 
 	/* the new subtree root is established after the 1st rotation */
 	subtree_root = prealloc_ror(ctxt, target);
-	if (!subtree_root)
-		return NULL;
 	target = subtree_root->right;
 
 	/* the 2nd rotation may add to the overall unbalancing/diff in height */
 	target = prealloc_rol(ctxt, target);
-	if (!target)
-		return NULL;
 	target = target->left;
 
 	return target;
 }
 
+/*
+ * prealloc_reverse_rlr() - reverse RLR for the unwind step
+ * @ctxt	AVL operations environment
+ * @target	root of the subtree to be rotated
+ *
+ * All the nodes subject to rotations must be part of the new branch.
+ * Returns the bottom of the rotated nodes. Does not fail.
+ */
 static struct sptree_node *prealloc_reverse_rlr(struct sptree_ctxt *ctxt, struct sptree_node *target)
 {
 	struct sptree_node *subtree_root;
@@ -1108,14 +1102,10 @@ static struct sptree_node *prealloc_reverse_rlr(struct sptree_ctxt *ctxt, struct
 
 	/* the new subtree root is established after the 1st rotation */
 	subtree_root = prealloc_rol(ctxt, target);
-	if (!subtree_root)
-		return NULL;
 	target = subtree_root->left;
 
 	/* the 2nd rotation may add to the overall unbalancing/diff in height */
 	target = prealloc_ror(ctxt, target);
-	if (!target)
-		return NULL;
 	target = target->right;
 
 	return target;
@@ -1214,12 +1204,11 @@ static struct sptree_node *prealloc_unwind_left(struct sptree_ctxt *ctxt, struct
 			return NULL;
 	}
 
-	target = prealloc_rol(ctxt, target);
-	if (!target)
-		return NULL;
-
 	/* rotation functions return the new subtree root */
-	return target->left;
+	target = prealloc_rol(ctxt, target);
+	target = target->left;
+
+	return target;
 }
 
 /* target->balance == -1 */
@@ -1242,12 +1231,11 @@ static struct sptree_node *prealloc_unwind_right(struct sptree_ctxt *ctxt, struc
 			return NULL;
 	}
 
-	target = prealloc_ror(ctxt, target);
-	if (!target)
-		return NULL;
-
 	/* rotation functions return the new subtree root */
-	return target->right;
+	target = prealloc_ror(ctxt, target);
+	target = target->right;
+
+	return target;
 }
 
 /*
