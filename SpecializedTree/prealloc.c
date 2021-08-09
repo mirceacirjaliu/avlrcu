@@ -307,6 +307,47 @@ static struct sptree_node *prealloc_parent(struct sptree_ctxt *ctxt, struct sptr
 	return new_parent;
 }
 
+/*
+ * prealloc_child() - brings a child to the new branch
+ * @ctxt - AVL operation environment
+ * @parent - a leaf on the new branch
+ * @which - LEFT or RIGHT child
+ *
+ * Only useful for unwind, cause it descents and must find a way down.
+ * The parent needs to be part of the new branch (the child points to old parent).
+ */
+static struct sptree_node *prealloc_child(struct sptree_ctxt *ctxt, struct sptree_node *parent, int which)
+{
+	struct sptree_node *child = which == LEFT_CHILD ? parent->left : parent->right;
+	struct sptree_node *new_child;
+
+	pr_debug("%s: %s child of "NODE_FMT"\n", __func__,
+		(which == LEFT_CHILD) ? "left" : "right", NODE_ARG(parent));
+	ASSERT(is_new_branch(parent));
+	ASSERT(child);
+
+	/* since rebalancing poorly balanced branches,
+	* some nodes may get new branch children during unwind */
+	if (is_new_branch(child))
+		return child;
+
+	/* bring the child to the new branch */
+	new_child = prealloc_replace(ctxt, child);
+	if (!new_child)
+		return NULL;
+
+	/* link on the new branch */
+	if (which == LEFT_CHILD) {
+		parent->left = new_child;
+		new_child->parent = make_left(parent);
+	}
+	else {
+		parent->right = new_child;
+		new_child->parent = make_right(parent);
+	}
+
+	return new_child;
+}
 
 
 /* return new root to be set as top of branch */
@@ -318,8 +359,8 @@ static struct sptree_node *prealloc_retrace_ror(struct sptree_node *root)
 
 	pr_debug("%s: root at "NODE_FMT", pivot at "NODE_FMT"\n",
 		__func__, NODE_ARG(root), NODE_ARG(pivot));
-	BUG_ON(!is_new_branch(root));
-	BUG_ON(!is_new_branch(pivot));
+	ASSERT(is_new_branch(root));
+	ASSERT(is_new_branch(pivot));
 
 	// redistribute t2
 	new_pivot->left = pivot->right;
@@ -357,9 +398,9 @@ static struct sptree_node *prealloc_retrace_rlr(struct sptree_node *root)
 	struct sptree_node *new_right = root;		// new X
 
 	pr_debug("%s: root at "NODE_FMT"\n", __func__, NODE_ARG(root));
-	BUG_ON(!is_new_branch(root));
-	BUG_ON(!is_new_branch(left));
-	BUG_ON(!is_new_branch(right));
+	ASSERT(is_new_branch(root));
+	ASSERT(is_new_branch(left));
+	ASSERT(is_new_branch(right));
 
 	// redistribute t2, t3
 	new_left->right = right->left;
@@ -407,8 +448,8 @@ static struct sptree_node *prealloc_retrace_rol(struct sptree_node *root)
 
 	pr_debug("%s: root at "NODE_FMT", pivot at "NODE_FMT"\n",
 		__func__, NODE_ARG(root), NODE_ARG(pivot));
-	BUG_ON(!is_new_branch(root));
-	BUG_ON(!is_new_branch(pivot));
+	ASSERT(is_new_branch(root));
+	ASSERT(is_new_branch(pivot));
 
 	// redistribute t2
 	new_pivot->right = pivot->left;
@@ -447,9 +488,9 @@ static struct sptree_node *prealloc_retrace_rrl(struct sptree_node *root)
 	struct sptree_node *new_right = right;		// new Z
 
 	pr_debug("%s: root at "NODE_FMT"\n", __func__, NODE_ARG(root));
-	BUG_ON(!is_new_branch(root));
-	BUG_ON(!is_new_branch(right));
-	BUG_ON(!is_new_branch(left));
+	ASSERT(is_new_branch(root));
+	ASSERT(is_new_branch(right));
+	ASSERT(is_new_branch(left));
 
 	// redistribute t2, t3
 	new_left->right = left->left;
@@ -633,7 +674,6 @@ int prealloc_insert(struct sptree_root *root, struct sptree_node *node)
 }
 
 
-
 struct balance_factors
 {
 	int root;
@@ -721,47 +761,6 @@ static struct balance_factors ror_new_balance(int root_bal, int pivot_bal)
 	return new_balance;
 }
 
-/*
- * prealloc_child() - brings a child to the new branch
- * @ctxt - AVL operation environment
- * @parent - a leaf on the new branch
- * @which - LEFT or RIGHT child
- *
- * Only useful for unwind, cause it descents and must find a way down.
- * The parent needs to be part of the new branch (the child points to old parent).
- */
-static struct sptree_node *prealloc_child(struct sptree_ctxt *ctxt, struct sptree_node *parent, int which)
-{
-	struct sptree_node *child = which == LEFT_CHILD ? parent->left : parent->right;
-	struct sptree_node *new_child;
-
-	pr_debug("%s: %s child of "NODE_FMT"\n", __func__,
-		(which == LEFT_CHILD) ? "left" : "right", NODE_ARG(parent));
-	ASSERT(is_new_branch(parent));
-	ASSERT(child);
-
-	/* since rebalancing poorly balanced branches,
-	 * some nodes may get new branch children during unwind */
-	if (is_new_branch(child))
-		return child;
-
-	/* bring the child to the new branch */
-	new_child = prealloc_replace(ctxt, child);
-	if (!new_child)
-		return NULL;
-
-	/* link on the new branch */
-	if (which == LEFT_CHILD) {
-		parent->left = new_child;
-		new_child->parent = make_left(parent);
-	}
-	else {
-		parent->right = new_child;
-		new_child->parent = make_right(parent);
-	}
-
-	return new_child;
-}
 
 /*
  * prealloc_propagate_change() - propagate height diff up the new branch
