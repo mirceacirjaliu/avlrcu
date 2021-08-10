@@ -3,6 +3,7 @@
 #define _SPECIALIZED_TREE_TEST_H_
 
 #include "tree.h"
+#include "internal.h"
 
 struct test_sptree_node {
 	/* task-specific fields */

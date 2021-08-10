@@ -159,12 +159,6 @@ static ssize_t prealloc_insert_map(struct file *file, const char __user *data, s
 
 	pr_debug("%s: at %lx\n", __func__, value);
 
-	// check if aligned to page
-	if (value & ~PAGE_MASK) {
-		pr_err("%s: non-aligned value: %lx\n", __func__, value);
-		return -EINVAL;
-	}
-
 	container = kzalloc(sizeof(struct test_sptree_node), GFP_ATOMIC);
 	if (!container)
 		return -ENOMEM;
@@ -199,12 +193,6 @@ static ssize_t prealloc_delete_map(struct file *file, const char __user *data, s
 		return result;
 
 	pr_debug("%s: at %lx\n", __func__, value);
-
-	// check if alligned to page
-	if (value & ~PAGE_MASK) {
-		pr_err("%s: non-aligned value: %lx\n", __func__, value);
-		return -EINVAL;
-	}
 
 	/* these have to match with the allocation functions */
 	spin_lock(&lock);
@@ -245,16 +233,10 @@ static ssize_t prealloc_unwind_map(struct file *file, const char __user *data, s
 
 	pr_debug("%s: at %lx\n", __func__, value);
 
-	// check if alligned to page
-	if (value & ~PAGE_MASK) {
-		pr_err("%s: non-aligned value: %lx\n", __func__, value);
-		return -EINVAL;
-	}
-
 	/* these have to match with the allocation functions */
 	spin_lock(&lock);
 
-	result = prealloc_unwind(&sptree_range, value);
+	result = test_unwind(&sptree_range, value);
 
 	spin_unlock(&lock);
 
@@ -293,16 +275,10 @@ static ssize_t ror_map(struct file *file, const char __user *data, size_t count,
 
 	pr_debug("%s: at %lx\n", __func__, value);
 
-	// check if alligned to page
-	if (value & ~PAGE_MASK) {
-		pr_err("%s: non-aligned value: %lx\n", __func__, value);
-		return -EINVAL;
-	}
-
 	/* these have to match with the allocation functions */
 	spin_lock(&lock);
 
-	result = sptree_ror(&sptree_range, value);
+	result = test_ror(&sptree_range, value);
 
 	spin_unlock(&lock);
 
@@ -327,16 +303,10 @@ static ssize_t rol_map(struct file *file, const char __user *data, size_t count,
 
 	pr_debug("%s: at %lx\n", __func__, value);
 
-	// check if alligned to page
-	if (value & ~PAGE_MASK) {
-		pr_err("%s: non-aligned value: %lx\n", __func__, value);
-		return -EINVAL;
-	}
-
 	/* these have to match with the allocation functions */
 	spin_lock(&lock);
 
-	result = sptree_rol(&sptree_range, value);
+	result = test_rol(&sptree_range, value);
 
 	spin_unlock(&lock);
 
@@ -361,16 +331,10 @@ static ssize_t rrl_map(struct file *file, const char __user *data, size_t count,
 
 	pr_debug("%s: at %lx\n", __func__, value);
 
-	// check if alligned to page
-	if (value & ~PAGE_MASK) {
-		pr_err("%s: non-aligned value: %lx\n", __func__, value);
-		return -EINVAL;
-	}
-
 	/* these have to match with the allocation functions */
 	spin_lock(&lock);
 
-	result = sptree_rrl(&sptree_range, value);
+	result = test_rrl(&sptree_range, value);
 
 	spin_unlock(&lock);
 
@@ -395,16 +359,10 @@ static ssize_t rlr_map(struct file *file, const char __user *data, size_t count,
 
 	pr_debug("%s: at %lx\n", __func__, value);
 
-	// check if alligned to page
-	if (value & ~PAGE_MASK) {
-		pr_err("%s: non-aligned value: %lx\n", __func__, value);
-		return -EINVAL;
-	}
-
 	/* these have to match with the allocation functions */
 	spin_lock(&lock);
 
-	result = sptree_rlr(&sptree_range, value);
+	result = test_rlr(&sptree_range, value);
 
 	spin_unlock(&lock);
 
