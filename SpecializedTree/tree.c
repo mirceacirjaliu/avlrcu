@@ -40,29 +40,29 @@ void sptree_free(struct sptree_root *root)
 
 // TODO: debug purposes only, remove once code is stable
 // checks the AVL condition for subtree depths
-static int validate_subtree_balancing(struct sptree_node *node)
+static int validate_subtree_balancing(struct sptree_root *root, struct sptree_node *node)
 {
 	int left_depth = 0;
 	int right_depth = 0;
 	int diff;
 
 	if (node->left)
-		left_depth = validate_subtree_balancing(node->left);
+		left_depth = validate_subtree_balancing(root, node->left);
 
 	if (node->right)
-		right_depth = validate_subtree_balancing(node->right);
+		right_depth = validate_subtree_balancing(root, node->right);
 
 	diff = right_depth - left_depth;
 
 	// check for balance outside [-1..1]
 	if (diff < -1 || diff > 1)
 		pr_warn("%s: excessive balance on "NODE_FMT", left depth %d, right depth %d\n",
-			__func__, NODE_ARG(node), left_depth, right_depth);
+			__func__, NODE_ARG(root, node), left_depth, right_depth);
 
 	// check if the algorithm computed the balance right
 	if (diff != node->balance)
 		pr_err("%s: wrong balance factor on "NODE_FMT", left depth %d, right depth %d\n",
-			__func__, NODE_ARG(node), left_depth, right_depth);
+			__func__, NODE_ARG(root, node), left_depth, right_depth);
 
 	// return the depth of the subtree rooted at node
 	return max(left_depth, right_depth) + 1;
@@ -71,7 +71,7 @@ static int validate_subtree_balancing(struct sptree_node *node)
 void validate_avl_balancing(struct sptree_root *root)
 {
 	if (root->root)
-		validate_subtree_balancing(root->root);
+		validate_subtree_balancing(root, root->root);
 }
 
 
@@ -99,7 +99,7 @@ struct sptree_node *search(struct sptree_root *root, unsigned long key)
 	if (crnt == NULL)
 		pr_debug("%s: found nothing\n", __func__);
 	else
-		pr_debug("%s: found inside "NODE_FMT"\n", __func__, NODE_ARG(crnt));
+		pr_debug("%s: found inside "NODE_FMT"\n", __func__, NODE_ARG(root, crnt));
 
 	return crnt;
 }
@@ -257,7 +257,7 @@ int test_ror(struct sptree_root *root, unsigned long addr)
 
 	pivot = target->left;
 	if (!pivot) {
-		pr_err("%s: we don't have a pivot for "NODE_FMT"\n", __func__, NODE_ARG(target));
+		pr_err("%s: we don't have a pivot for "NODE_FMT"\n", __func__, NODE_ARG(root, target));
 		return -EINVAL;
 	}
 
@@ -318,7 +318,7 @@ int test_rol(struct sptree_root *root, unsigned long addr)
 
 	pivot = target->right;
 	if (!pivot) {
-		pr_err("%s: we don't have a pivot for "NODE_FMT"\n", __func__, NODE_ARG(target));
+		pr_err("%s: we don't have a pivot for "NODE_FMT"\n", __func__, NODE_ARG(root, target));
 		return -EINVAL;
 	}
 
@@ -381,12 +381,12 @@ int test_rrl(struct sptree_root *root, unsigned long addr)
 		return -ENXIO;
 
 	if (!target->right) {
-		pr_err("%s: node "NODE_FMT" is too low\n", __func__, NODE_ARG(target));
+		pr_err("%s: node "NODE_FMT" is too low\n", __func__, NODE_ARG(root, target));
 		return -EINVAL;
 	}
 
 	if (!target->right->left) {
-		pr_err("%s: node "NODE_FMT" is too low\n", __func__, NODE_ARG(target));
+		pr_err("%s: node "NODE_FMT" is too low\n", __func__, NODE_ARG(root, target));
 		return -EINVAL;
 	}
 
@@ -449,12 +449,12 @@ int test_rlr(struct sptree_root *root, unsigned long addr)
 		return -ENXIO;
 
 	if (!target->left) {
-		pr_err("%s: node "NODE_FMT" is too low\n", __func__, NODE_ARG(target));
+		pr_err("%s: node "NODE_FMT" is too low\n", __func__, NODE_ARG(root, target));
 		return -EINVAL;
 	}
 
 	if (!target->left->right) {
-		pr_err("%s: node "NODE_FMT" is too low\n", __func__, NODE_ARG(target));
+		pr_err("%s: node "NODE_FMT" is too low\n", __func__, NODE_ARG(root, target));
 		return -EINVAL;
 	}
 
@@ -485,7 +485,7 @@ int test_unwind(struct sptree_root *root, unsigned long key)
 		return -ENXIO;
 
 	if (is_leaf(target)) {
-		pr_err("%s: node "NODE_FMT" already a leaf\n", __func__, NODE_ARG(target));
+		pr_err("%s: node "NODE_FMT" already a leaf\n", __func__, NODE_ARG(root, target));
 		return -EINVAL;
 	}
 
@@ -495,7 +495,7 @@ int test_unwind(struct sptree_root *root, unsigned long key)
 	prealloc = prealloc_unwind(&ctxt, target);
 	if (!prealloc)
 		return -ENOMEM;
-	prealloc = prealloc_top(prealloc);
+	prealloc = prealloc_top(&ctxt, prealloc);
 
 	pr_debug("%s: overall increase in height %d\n", __func__, ctxt.diff);
 

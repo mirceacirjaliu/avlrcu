@@ -74,7 +74,13 @@ static inline bool is_new_branch(struct sptree_node *node)
 }
 
 #define NODE_FMT "(%lx, %ld)"
-#define NODE_ARG(__node) (long)&(__node), (long)(__node)->balance
+#define NODE_ARG(_root, _node)	\
+	({							\
+		struct sptree_ops *ops = (_root)->ops;		\
+		unsigned long key = ops->get_key(_node);	\
+		key;						\
+	}),					\
+	(long)(_node)->balance
 
 extern struct sptree_node *prealloc_replace(struct sptree_ctxt *ctxt, struct sptree_node *target);
 extern struct sptree_node *prealloc_parent(struct sptree_ctxt *ctxt, struct sptree_node *child);
@@ -88,7 +94,7 @@ extern struct sptree_node *prealloc_rlr(struct sptree_ctxt *ctxt, struct sptree_
 
 extern void sptree_ctxt_init(struct sptree_ctxt *ctxt, struct sptree_root *root);
 extern struct sptree_node *prealloc_unwind(struct sptree_ctxt *ctxt, struct sptree_node *target);
-extern struct sptree_node *prealloc_top(struct sptree_node *target);
+extern struct sptree_node *prealloc_top(struct sptree_ctxt *ctxt, struct sptree_node *target);
 
 void prealloc_connect(struct sptree_root *root, struct sptree_node *branch);
 extern void prealloc_remove_old(struct sptree_ctxt *ctxt);

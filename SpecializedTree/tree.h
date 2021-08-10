@@ -25,7 +25,7 @@ struct sptree_ops {
 	struct sptree_node *(*alloc)(void);
 	void (*free)(struct sptree_node *);
 	void (*free_rcu)(struct sptree_node *);
-	unsigned long (*get_key)(struct sptree_node *);
+	unsigned long (*get_key)(const struct sptree_node *);
 	void (*copy)(struct sptree_node *, struct sptree_node *);
 };
 

@@ -66,7 +66,7 @@ static void test_free_rcu(struct sptree_node *node)
 
 }
 
-static unsigned long test_get_key(struct sptree_node *node)
+static unsigned long test_get_key(const struct sptree_node *node)
 {
 	struct test_sptree_node *container;
 	container = sptree_entry(node, struct test_sptree_node, node);
