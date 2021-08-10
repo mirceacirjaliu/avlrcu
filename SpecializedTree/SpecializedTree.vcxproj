@@ -95,13 +95,13 @@
     <Text Include="Makefile" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="main.c" />
     <ClCompile Include="prealloc.c" />
+    <ClCompile Include="test.c" />
     <ClCompile Include="tree.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="internal.h" />
-    <ClInclude Include="main.h" />
+    <ClInclude Include="test.h" />
     <ClInclude Include="tree.h" />
   </ItemGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">

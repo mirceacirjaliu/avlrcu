@@ -1,6 +1,6 @@
 
-#ifndef _SPECIALIZED_TREE_TEST_H_
-#define _SPECIALIZED_TREE_TEST_H_
+#ifndef _SPTREE_TEST_H_
+#define _SPTREE_TEST_H_
 
 #include "tree.h"
 #include "internal.h"
@@ -13,4 +13,4 @@ struct test_sptree_node {
 	struct sptree_node node;
 };
 
-#endif /* _SPECIALIZED_TREE_TEST_H_ */
+#endif /* _SPTREE_TEST_H_ */

@@ -16,7 +16,7 @@
 #include <linux/spinlock.h>
 #include <linux/fault-inject.h>
 
-#include "main.h"
+#include "test.h"
 
 // the object we test
 static struct sptree_root sptree_range;

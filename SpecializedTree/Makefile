@@ -1,6 +1,6 @@
 
 
-specialized-tree-y += main.o tree.o prealloc.o
+specialized-tree-y += test.o tree.o prealloc.o
 
 # += -O1 -fno-inline
 CFLAGS_tree.o += -Wno-implicit-fallthrough
