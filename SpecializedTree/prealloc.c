@@ -180,10 +180,7 @@ void prealloc_connect(struct sptree_node **pbranch, struct sptree_node *branch)
 {
 	struct sptree_node *node;
 
-	if (branch == NULL)
-		pr_debug("%s: at (EMPTY)\n", __func__);
-	else
-		pr_debug("%s: at "NODE_FMT"\n", __func__, NODE_ARG(branch));
+	pr_debug("%s: at "NODE_FMT"\n", __func__, NODE_ARG(branch));
 
 	sptree_for_each_prealloc_rin(node, branch) {
 		ASSERT(is_new_branch(node));
@@ -202,6 +199,21 @@ void prealloc_connect(struct sptree_node **pbranch, struct sptree_node *branch)
 
 	/* finally link root / degenerate case (empty new branch) */
 	rcu_assign_pointer(*pbranch, branch);
+}
+
+/*
+ * prealloc_connect_root() - degenerate case for prealloc_connect()
+ * @root	root of the tree
+ *
+ * Used for deletion, in the case where the single node in the tree
+ * (the root) gets deleted. In this case the preallocated branch is
+ * NULL and gets connected to the root.
+ */
+void prealloc_connect_root(struct sptree_root *root)
+{
+	pr_debug("%s: at (EMPTY)\n", __func__);
+
+	rcu_assign_pointer(root->root, NULL);
 }
 
 /*
@@ -669,11 +681,7 @@ int prealloc_insert(struct sptree_root *root, struct sptree_node *node)
 	if (!prealloc)
 		return -ENOMEM;
 
-	// parent may contain L/R flags or NULL
-	parent = prealloc->parent;
-	pbranch = get_pnode(root, parent);
-
-	// connect the preallocated branch
+	pbranch = get_pnode(root, prealloc->parent);
 	prealloc_connect(pbranch, prealloc);
 
 	// this will remove the replaced nodes
@@ -1560,16 +1568,13 @@ static struct sptree_node *unwind_delete_retrace(struct sptree_ctxt *ctxt, struc
  */
 struct sptree_node *prealloc_delete(struct sptree_root *root, unsigned long key)
 {
-	struct sptree_node *target, *parent, **pbranch;
+	struct sptree_node *target, **pbranch;
 	struct sptree_node *prealloc;
 	struct sptree_ctxt ctxt;
 
 	target = search(root, key);
 	if (!target)
 		return ERR_PTR(-ENXIO);
-
-	// parent may contain L/R flags or NULL
-	parent = target->parent;
 
 	sptree_ctxt_init(&ctxt, root);
 
@@ -1578,13 +1583,12 @@ struct sptree_node *prealloc_delete(struct sptree_root *root, unsigned long key)
 	if (IS_ERR(prealloc))
 		return prealloc;
 
-	/* new branch may climb after retrace & take over the old parent */
-	if (prealloc)
-		parent = prealloc->parent;
-	pbranch = get_pnode(root, parent);
-
-	// connect the preallocated branch
-	prealloc_connect(pbranch, prealloc);
+	if (prealloc) {
+		pbranch = get_pnode(root, prealloc->parent);
+		prealloc_connect(pbranch, prealloc);
+	}
+	else
+		prealloc_connect_root(root);
 
 	// this will remove the replaced nodes
 	if (!llist_empty(&ctxt.old))
