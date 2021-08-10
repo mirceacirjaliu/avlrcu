@@ -147,7 +147,7 @@ static int validator_func(void *arg)
 	return 0;
 }
 
-static ssize_t prealloc_insert_map(struct file *file, const char __user *data, size_t count, loff_t *offs)
+static ssize_t insert_map(struct file *file, const char __user *data, size_t count, loff_t *offs)
 {
 	unsigned long value;
 	struct test_sptree_node *container;
@@ -181,7 +181,7 @@ static ssize_t prealloc_insert_map(struct file *file, const char __user *data, s
 	return count;
 }
 
-static ssize_t prealloc_delete_map(struct file *file, const char __user *data, size_t count, loff_t *offs)
+static ssize_t delete_map(struct file *file, const char __user *data, size_t count, loff_t *offs)
 {
 	unsigned long value;
 	struct sptree_node *node;
@@ -201,7 +201,7 @@ static ssize_t prealloc_delete_map(struct file *file, const char __user *data, s
 
 	spin_unlock(&lock);
 
-	if (node) {
+	if (!IS_ERR(node)) {
 		container = sptree_entry(node, struct test_sptree_node, node);
 		kfree_rcu(container, node.rcu);
 		// or
@@ -222,7 +222,7 @@ static ssize_t prealloc_delete_map(struct file *file, const char __user *data, s
 	return count;
 }
 
-static ssize_t prealloc_unwind_map(struct file *file, const char __user *data, size_t count, loff_t *offs)
+static ssize_t unwind_map(struct file *file, const char __user *data, size_t count, loff_t *offs)
 {
 	unsigned long value;
 	int result;
@@ -554,19 +554,19 @@ int dump_po_open(struct inode *inode, struct file *file)
 }
 
 
-static struct file_operations prealloc_insert_map_ops = {
+static struct file_operations insert_map_ops = {
 	.owner = THIS_MODULE,
-	.write = prealloc_insert_map,
+	.write = insert_map,
 };
 
-static struct file_operations prealloc_delete_map_ops = {
+static struct file_operations delete_map_ops = {
 	.owner = THIS_MODULE,
-	.write = prealloc_delete_map,
+	.write = delete_map,
 };
 
-static struct file_operations prealloc_unwind_map_ops = {
+static struct file_operations unwind_map_ops = {
 	.owner = THIS_MODULE,
-	.write = prealloc_unwind_map,
+	.write = unwind_map,
 };
 
 static struct file_operations clear_map_ops = {
@@ -618,15 +618,15 @@ static int __init sptree_debugfs_init(void)
 	if (IS_ERR(debugfs_dir))
 		return PTR_ERR(debugfs_dir);
 
-	result = debugfs_create_file("prealloc_insert", S_IWUGO, debugfs_dir, NULL, &prealloc_insert_map_ops);
+	result = debugfs_create_file("insert", S_IWUGO, debugfs_dir, NULL, &insert_map_ops);
 	if (IS_ERR(result))
 		goto error;
 
-	result = debugfs_create_file("prealloc_delete", S_IWUGO, debugfs_dir, NULL, &prealloc_delete_map_ops);
+	result = debugfs_create_file("delete", S_IWUGO, debugfs_dir, NULL, &delete_map_ops);
 	if (IS_ERR(result))
 		goto error;
 
-	result = debugfs_create_file("prealloc_unwind", S_IWUGO, debugfs_dir, NULL, &prealloc_unwind_map_ops);
+	result = debugfs_create_file("unwind", S_IWUGO, debugfs_dir, NULL, &unwind_map_ops);
 	if (IS_ERR(result))
 		goto error;
 
