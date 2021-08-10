@@ -166,7 +166,6 @@ struct sptree_node *prealloc_next_rin(struct sptree_node *node)
  * @branch:	The root of the new branch/subtree
  *
  * Used on insertion/deletion. The new branch can be:
- * - NULL (empty branch) when deleting a leaf node
  * - a single node or a branch for insertion
  * - a single node or a subtree for deletion
  *
@@ -176,8 +175,9 @@ struct sptree_node *prealloc_next_rin(struct sptree_node *node)
  * it returns into the new branch and stays there.
  * Searches will start in the old branch and will stay there.
  */
-void prealloc_connect(struct sptree_node **pbranch, struct sptree_node *branch)
+void prealloc_connect(struct sptree_root *root, struct sptree_node *branch)
 {
+	struct sptree_node **pbranch;
 	struct sptree_node *node;
 
 	pr_debug("%s: at "NODE_FMT"\n", __func__, NODE_ARG(branch));
@@ -198,6 +198,7 @@ void prealloc_connect(struct sptree_node **pbranch, struct sptree_node *branch)
 	}
 
 	/* finally link root / degenerate case (empty new branch) */
+	pbranch = get_pnode(root, branch->parent);
 	rcu_assign_pointer(*pbranch, branch);
 }
 
@@ -209,7 +210,7 @@ void prealloc_connect(struct sptree_node **pbranch, struct sptree_node *branch)
  * (the root) gets deleted. In this case the preallocated branch is
  * NULL and gets connected to the root.
  */
-void prealloc_connect_root(struct sptree_root *root)
+static void prealloc_connect_root(struct sptree_root *root)
 {
 	pr_debug("%s: at (EMPTY)\n", __func__);
 
@@ -643,7 +644,7 @@ error:
 int prealloc_insert(struct sptree_root *root, struct sptree_node *node)
 {
 	struct sptree_ops *ops = root->ops;
-	struct sptree_node *crnt, *parent, **pbranch;
+	struct sptree_node *crnt, *parent;
 	struct sptree_node *prealloc;
 	struct sptree_ctxt ctxt;
 
@@ -681,8 +682,7 @@ int prealloc_insert(struct sptree_root *root, struct sptree_node *node)
 	if (!prealloc)
 		return -ENOMEM;
 
-	pbranch = get_pnode(root, prealloc->parent);
-	prealloc_connect(pbranch, prealloc);
+	prealloc_connect(root, prealloc);
 
 	// this will remove the replaced nodes
 	if (!llist_empty(&ctxt.old))
@@ -1568,7 +1568,7 @@ static struct sptree_node *unwind_delete_retrace(struct sptree_ctxt *ctxt, struc
  */
 struct sptree_node *prealloc_delete(struct sptree_root *root, unsigned long key)
 {
-	struct sptree_node *target, **pbranch;
+	struct sptree_node *target;
 	struct sptree_node *prealloc;
 	struct sptree_ctxt ctxt;
 
@@ -1583,10 +1583,8 @@ struct sptree_node *prealloc_delete(struct sptree_root *root, unsigned long key)
 	if (IS_ERR(prealloc))
 		return prealloc;
 
-	if (prealloc) {
-		pbranch = get_pnode(root, prealloc->parent);
-		prealloc_connect(pbranch, prealloc);
-	}
+	if (prealloc)
+		prealloc_connect(root, prealloc);
 	else
 		prealloc_connect_root(root);
 

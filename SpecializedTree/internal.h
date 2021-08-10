@@ -90,7 +90,7 @@ extern void sptree_ctxt_init(struct sptree_ctxt *ctxt, struct sptree_root *root)
 extern struct sptree_node *prealloc_unwind(struct sptree_ctxt *ctxt, struct sptree_node *target);
 extern struct sptree_node *prealloc_top(struct sptree_node *target);
 
-extern void prealloc_connect(struct sptree_node **pbranch, struct sptree_node *branch);
+void prealloc_connect(struct sptree_root *root, struct sptree_node *branch);
 extern void prealloc_remove_old(struct sptree_ctxt *ctxt);
 extern void _delete_prealloc(struct sptree_ctxt *ctxt, struct sptree_node *prealloc);
 

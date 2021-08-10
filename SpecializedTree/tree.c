@@ -246,7 +246,7 @@ error:
 
 int test_ror(struct sptree_root *root, unsigned long addr)
 {
-	struct sptree_node *target, **pbranch;
+	struct sptree_node *target;
 	struct sptree_node *pivot;
 	struct sptree_node *prealloc;
 	struct sptree_ctxt ctxt;
@@ -267,8 +267,7 @@ int test_ror(struct sptree_root *root, unsigned long addr)
 	if (!prealloc)
 		return -ENOMEM;
 
-	pbranch = get_pnode(root, prealloc->parent);
-	prealloc_connect(pbranch, prealloc);
+	prealloc_connect(root, prealloc);
 
 	if (!llist_empty(&ctxt.old))
 		prealloc_remove_old(&ctxt);
@@ -308,7 +307,7 @@ error:
 
 int test_rol(struct sptree_root *root, unsigned long addr)
 {
-	struct sptree_node *target, **pbranch;
+	struct sptree_node *target;
 	struct sptree_node *pivot;
 	struct sptree_node *prealloc;
 	struct sptree_ctxt ctxt;
@@ -329,8 +328,7 @@ int test_rol(struct sptree_root *root, unsigned long addr)
 	if (!prealloc)
 		return -ENOMEM;
 
-	pbranch = get_pnode(root, prealloc->parent);
-	prealloc_connect(pbranch, prealloc);
+	prealloc_connect(root, prealloc);
 
 	if (!llist_empty(&ctxt.old))
 		prealloc_remove_old(&ctxt);
@@ -374,7 +372,7 @@ error:
 
 int test_rrl(struct sptree_root *root, unsigned long addr)
 {
-	struct sptree_node *target, **pbranch;
+	struct sptree_node *target;
 	struct sptree_node *prealloc;
 	struct sptree_ctxt ctxt;
 
@@ -398,8 +396,7 @@ int test_rrl(struct sptree_root *root, unsigned long addr)
 	if (!prealloc)
 		return -ENOMEM;
 
-	pbranch = get_pnode(root, prealloc->parent);
-	prealloc_connect(pbranch, prealloc);
+	prealloc_connect(root, prealloc);
 
 	if (!llist_empty(&ctxt.old))
 		prealloc_remove_old(&ctxt);
@@ -443,7 +440,7 @@ error:
 
 int test_rlr(struct sptree_root *root, unsigned long addr)
 {
-	struct sptree_node *target, **pbranch;
+	struct sptree_node *target;
 	struct sptree_node *prealloc;
 	struct sptree_ctxt ctxt;
 
@@ -467,8 +464,7 @@ int test_rlr(struct sptree_root *root, unsigned long addr)
 	if (!prealloc)
 		return -ENOMEM;
 
-	pbranch = get_pnode(root, prealloc->parent);
-	prealloc_connect(pbranch, prealloc);
+	prealloc_connect(root, prealloc);
 
 	if (!llist_empty(&ctxt.old))
 		prealloc_remove_old(&ctxt);
@@ -480,7 +476,7 @@ int test_rlr(struct sptree_root *root, unsigned long addr)
 
 int test_unwind(struct sptree_root *root, unsigned long key)
 {
-	struct sptree_node *target, **pbranch;
+	struct sptree_node *target;
 	struct sptree_node *prealloc;
 	struct sptree_ctxt ctxt;
 
@@ -503,8 +499,7 @@ int test_unwind(struct sptree_root *root, unsigned long key)
 
 	pr_debug("%s: overall increase in height %d\n", __func__, ctxt.diff);
 
-	pbranch = get_pnode(root, prealloc->parent);
-	prealloc_connect(pbranch, prealloc);
+	prealloc_connect(root, prealloc);
 
 	// this will remove the replaced nodes
 	if (!llist_empty(&ctxt.old))
