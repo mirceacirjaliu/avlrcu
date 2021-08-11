@@ -11,8 +11,6 @@
 
 #include "internal.h"
 
-#define ASSERT(_expr) BUG_ON(!(_expr))
-
 
 void sptree_ctxt_init(struct sptree_ctxt *ctxt, struct sptree_root *root)
 {
@@ -280,7 +278,7 @@ struct sptree_node *prealloc_replace(struct sptree_ctxt *ctxt, struct sptree_nod
 	ops->copy(prealloc, target);
 	prealloc->new_branch = 1;
 
-	__llist_add(&target->old, &ctxt->old);				/* add to chain of old nodes */
+	__llist_add(&target->old, &ctxt->old);		/* add to chain of old nodes */
 
 	return prealloc;
 }

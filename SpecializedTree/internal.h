@@ -4,6 +4,7 @@
 
 #include "tree.h"
 
+#define ASSERT(_expr) BUG_ON(!(_expr))
 
 /* context for insert/delete operations */
 struct sptree_ctxt {

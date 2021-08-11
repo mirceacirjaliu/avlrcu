@@ -215,10 +215,44 @@ extern struct sptree_node *sptree_next_po(struct sptree_node *node)
 		return strip_flags(parent);
 }
 
+static struct sptree_node *fix_diff_height(struct sptree_ctxt *ctxt, struct sptree_node *prealloc)
+{
+	struct sptree_node *initial = prealloc;
+	int i, num, diff;
+
+	pr_debug("%s: overall increase in height: %d\n", __func__, ctxt->diff);
+	ASSERT(is_new_branch(prealloc));
+
+	/* extend the preallocated branch up to the root */
+	while (!is_root(prealloc->parent)) {
+		prealloc = prealloc_parent(ctxt, prealloc);
+		if (!prealloc)
+			goto error;
+	}
+
+	/* we have positive or negative diff ? */
+	if (ctxt->diff > 0) {
+		diff = 1;
+		num = ctxt->diff;
+	}
+	else {
+		diff = -1;
+		num = -ctxt->diff;
+	}
+
+	/* call this func with diff +-1, num times */
+	for (i = 0; i < num; i++)
+		prealloc_propagate_change(ctxt, initial, diff);
+
+	return prealloc;
+
+error:
+	_delete_prealloc(ctxt, prealloc);
+	return NULL;
+}
 
 static struct sptree_node *rotate_right_generic(struct sptree_ctxt *ctxt, struct sptree_node *target)
 {
-	struct sptree_node *prealloc;
 	struct sptree_node *pivot;
 
 	target = prealloc_replace(ctxt, target);
@@ -229,15 +263,7 @@ static struct sptree_node *rotate_right_generic(struct sptree_ctxt *ctxt, struct
 	if (!pivot)
 		goto error;
 
-	prealloc = prealloc_ror(ctxt, target);
-
-	if (ctxt->diff == 0)
-		return prealloc;
-
-	// otherwise extend the prealloc tree up & propagate diff
-	// ...
-
-	return prealloc;
+	return prealloc_ror(ctxt, target);
 
 error:
 	_delete_prealloc(ctxt, target);
@@ -267,6 +293,9 @@ int test_ror(struct sptree_root *root, unsigned long addr)
 	if (!prealloc)
 		return -ENOMEM;
 
+	if (ctxt.diff != 0)
+		prealloc = fix_diff_height(&ctxt, prealloc);
+
 	prealloc_connect(root, prealloc);
 
 	if (!llist_empty(&ctxt.old))
@@ -279,7 +308,6 @@ int test_ror(struct sptree_root *root, unsigned long addr)
 
 static struct sptree_node *rotate_left_generic(struct sptree_ctxt *ctxt, struct sptree_node *target)
 {
-	struct sptree_node *prealloc;
 	struct sptree_node *pivot;
 
 	target = prealloc_replace(ctxt, target);
@@ -290,15 +318,7 @@ static struct sptree_node *rotate_left_generic(struct sptree_ctxt *ctxt, struct 
 	if (!pivot)
 		goto error;
 
-	prealloc = prealloc_rol(ctxt, target);
-
-	if (ctxt->diff == 0)
-		return prealloc;
-
-	// otherwise extend the prealloc tree up & propagate diff
-	// ...
-
-	return prealloc;
+	return prealloc_rol(ctxt, target);
 
 error:
 	_delete_prealloc(ctxt, target);
@@ -328,6 +348,9 @@ int test_rol(struct sptree_root *root, unsigned long addr)
 	if (!prealloc)
 		return -ENOMEM;
 
+	if (ctxt.diff != 0)
+		prealloc = fix_diff_height(&ctxt, prealloc);
+
 	prealloc_connect(root, prealloc);
 
 	if (!llist_empty(&ctxt.old))
@@ -341,7 +364,6 @@ int test_rol(struct sptree_root *root, unsigned long addr)
 static struct sptree_node *rotate_right_left_generic(struct sptree_ctxt *ctxt, struct sptree_node *target)
 {
 	struct sptree_node *left, *right;
-	struct sptree_node *prealloc;
 
 	target = prealloc_replace(ctxt, target);
 	if (!target)
@@ -355,15 +377,7 @@ static struct sptree_node *rotate_right_left_generic(struct sptree_ctxt *ctxt, s
 	if (!left)
 		goto error;
 
-	prealloc = prealloc_rrl(ctxt, target);
-
-	if (ctxt->diff == 0)
-		return prealloc;
-
-	// otherwise extend the prealloc tree up & propagate diff
-	// ...
-
-	return prealloc;
+	return prealloc_rrl(ctxt, target);
 
 error:
 	_delete_prealloc(ctxt, target);
@@ -396,6 +410,9 @@ int test_rrl(struct sptree_root *root, unsigned long addr)
 	if (!prealloc)
 		return -ENOMEM;
 
+	if (ctxt.diff != 0)
+		prealloc = fix_diff_height(&ctxt, prealloc);
+
 	prealloc_connect(root, prealloc);
 
 	if (!llist_empty(&ctxt.old))
@@ -409,7 +426,6 @@ int test_rrl(struct sptree_root *root, unsigned long addr)
 static struct sptree_node *rotate_left_right_generic(struct sptree_ctxt *ctxt, struct sptree_node *target)
 {
 	struct sptree_node *left, *right;
-	struct sptree_node *prealloc;
 
 	target = prealloc_replace(ctxt, target);
 	if (!target)
@@ -423,15 +439,7 @@ static struct sptree_node *rotate_left_right_generic(struct sptree_ctxt *ctxt, s
 	if (!right)
 		goto error;
 
-	prealloc = prealloc_rlr(ctxt, target);
-
-	if (ctxt->diff == 0)
-		return prealloc;
-
-	// otherwise extend the prealloc tree up & propagate diff
-	// ...
-
-	return prealloc;
+	return prealloc_rlr(ctxt, target);
 
 error:
 	_delete_prealloc(ctxt, target);
@@ -463,6 +471,9 @@ int test_rlr(struct sptree_root *root, unsigned long addr)
 	prealloc = rotate_left_right_generic(&ctxt, target);
 	if (!prealloc)
 		return -ENOMEM;
+
+	if (ctxt.diff != 0)
+		prealloc = fix_diff_height(&ctxt, prealloc);
 
 	prealloc_connect(root, prealloc);
 
@@ -497,7 +508,8 @@ int test_unwind(struct sptree_root *root, unsigned long key)
 		return -ENOMEM;
 	prealloc = prealloc_top(&ctxt, prealloc);
 
-	pr_debug("%s: overall increase in height %d\n", __func__, ctxt.diff);
+	if (ctxt.diff != 0)
+		prealloc = fix_diff_height(&ctxt, prealloc);
 
 	prealloc_connect(root, prealloc);
 
