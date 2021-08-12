@@ -1424,11 +1424,19 @@ static struct sptree_node *delete_retrace(struct sptree_ctxt *ctxt, struct sptre
 
 		if (is_left_child(node->parent)) {
 			if (parent->balance > 0) {
-				sibling = parent->right;
+				sibling = prealloc_child(ctxt, parent, RIGHT_CHILD);
+				if (!sibling)
+					goto error;
+
 				sibling_balance_before = sibling->balance;
 
-				if (sibling->balance < 0)
-					parent = prealloc_retrace_rlr(ctxt, parent);
+				if (sibling->balance < 0) {
+					temp = prealloc_child(ctxt, sibling, LEFT_CHILD);
+					if (!temp)
+						goto error;
+
+					parent = prealloc_retrace_rrl(ctxt, parent);
+				}
 				else
 					parent = prealloc_retrace_rol(ctxt, parent);
 			}
@@ -1445,11 +1453,19 @@ static struct sptree_node *delete_retrace(struct sptree_ctxt *ctxt, struct sptre
 		// is right child
 		else {
 			if (parent->balance < 0) {
-				sibling = parent->left;
+				sibling = prealloc_child(ctxt, parent, LEFT_CHILD);
+				if (!sibling)
+					goto error;
+
 				sibling_balance_before = sibling->balance;
 
-				if (sibling->balance > 0)
+				if (sibling->balance > 0) {
+					temp = prealloc_child(ctxt, sibling, RIGHT_CHILD);
+					if (!temp)
+						goto error;
+
 					parent = prealloc_retrace_rlr(ctxt, parent);
+				}
 				else
 					parent = prealloc_retrace_ror(ctxt, parent);
 			}
