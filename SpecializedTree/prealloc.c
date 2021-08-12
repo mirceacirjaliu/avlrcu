@@ -1354,68 +1354,71 @@ error:
 	return NULL;
 }
 
-/**
- * delete_retrace() - does the fix & retrace steps
+/*
+ * prealloc_fix() - fix the unwinding effects on the new branch
  * @ctxt - AVL operations environment
  * @parent - parent of the leaf that was just deleted
  *
  * Receives the parent of the deleted leaf, that is now itself a leaf on the new branch.
- * (It may have another child, but on the old branch. Does this comment help at all ?!)
- * So the bottom of the new branch.
- *
+ * (It may have another child, but on the old branch.) So the bottom of the new branch.
  * Does the fix on the new branch. That is correcting the excessive unbalance that resulted
- * from reverse double rotations. If the resulting subtree is shorter than the original,
- * then a retrace is attempted starting at its parent.
+ * from reverse double rotations.
  *
- * Will return NULL on error.
+ * Returns the top of the new branch. Does not fail.
  */
-static struct sptree_node *delete_retrace(struct sptree_ctxt *ctxt, struct sptree_node *parent)
+static struct sptree_node *prealloc_fix(struct sptree_ctxt *ctxt, struct sptree_node *parent)
 {
-	struct sptree_node *node, *temp, *sibling;
-	int sibling_balance_before;
+	struct sptree_node *node;
 
 	pr_debug("%s: starting at "NODE_FMT"\n", __func__, NODE_ARG(ctxt->root, parent));
 	ASSERT(is_new_branch(parent));
 
-	/* fix step - running only on the new branch */
 	/* walk up the new branch & look for excessive unbalancing */
 	do {
 		node = parent;
 
 		switch (node->balance) {
 		case -2:
-			temp = prealloc_rlr(ctxt, node);
-			if (!temp)
-				goto error;
-			node = temp;
+			node = prealloc_rlr(ctxt, node);
 			break;
 
 		case 2:
-			temp = prealloc_rrl(ctxt, node);
-			if (!temp)
-				goto error;
-			node = temp;
+			node = prealloc_rrl(ctxt, node);
 			break;
 		}
 
 		parent = get_parent(node);
 	} while (!is_root(parent) && is_new_branch(parent));
 
-	pr_debug("%s: overall diff after fix %d\n", __func__, ctxt->diff);
+	return node;
+}
 
-	/* no need to retrace if there is no change in height */
-	if (ctxt->diff == 0)
-		return node;
+/**
+ * delete_retrace() - retrace after delete
+ * @ctxt - AVL operations environment
+ * @node - top of the new branch
+ *
+ * If the resulting subtree is shorter than the original,
+ * then a retrace is attempted starting at its top.
+ *
+ * Will return NULL on error.
+ */
+static struct sptree_node *delete_retrace(struct sptree_ctxt *ctxt, struct sptree_node *node)
+{
+	struct sptree_node *temp, *parent, *sibling;
+	int sibling_balance_before;
 
+	pr_debug("%s: starting at "NODE_FMT"\n", __func__, NODE_ARG(ctxt->root, node));
+	ASSERT(is_new_branch(node));
 	ASSERT(ctxt->diff == -1);
 
-	/* rest of the retracing (parent already contains the link point of the new branch) */
 	/* integrate diff == -1 condition into the control flow,
 	 * loop as long as there is a decrease in height present */
-	for (; !is_root(parent); node = parent, parent = get_parent(node)) {
+	for (parent = get_parent(node); !is_root(parent); node = parent, parent = get_parent(node)) {
 
 		pr_debug("%s: loop on parent "NODE_FMT", node is "NODE_FMT"\n",
 			__func__, NODE_ARG(ctxt->root, parent), NODE_ARG(ctxt->root, node));
+		ASSERT(!is_new_branch(parent));
 
 		/* bring parent to new branch */
 		parent = prealloc_parent(ctxt, node);
@@ -1501,53 +1504,78 @@ static struct sptree_node *unwind_delete_retrace(struct sptree_ctxt *ctxt, struc
 	struct sptree_ops *ops = ctxt->root->ops;
 	struct sptree_node *prealloc, *leaf;
 	struct sptree_node *parent;
-	bool left_child;
 
 	if (is_leaf(node)) {
-		struct sptree_node fake_leaf;
-
-		__llist_add(&node->old, &ctxt->old);		/* add to chain of old nodes */
-
 		/* if that node is the only node in the tree, the new branch is empty (NULL) */
-		if (is_root(node->parent))
+		if (is_root(node->parent)) {
+			__llist_add(&node->old, &ctxt->old);		/* add to chain of old nodes */
+
 			return NULL;
+		}
 
-		/* create a fake leaf on the stack to avoid allocations */
-		memcpy(&fake_leaf, node, sizeof(struct sptree_node));
-		fake_leaf.new_branch = 1;
-		leaf = &fake_leaf;
-
-		/* prealloc parent from the fake leaf */
-		parent = prealloc_parent(ctxt, leaf);
-		if (!parent)
+		/* duplicate the leaf for the functions to work */
+		leaf = prealloc_replace(ctxt, node);
+		if (!leaf)
 			return ERR_PTR(-ENOMEM);
 
-		left_child = is_left_child(leaf->parent);
-		prealloc_propagate_change(ctxt, leaf, -1);
+		/* retrace does not work on modified ancestor balance factors */
+		ctxt->diff = -1;
+
+		/* the leaf has a parent that needs retracing */
+		prealloc = delete_retrace(ctxt, leaf);
+		if (!prealloc)
+			return ERR_PTR(-ENOMEM);
+
+		/* this parent has been brought to the new branch */
+		parent = get_parent(leaf);
+		ASSERT(is_new_branch(parent));
+
+		/* clear pointer in parent pointing to the leaf */
+		if (is_left_child(leaf->parent))
+			parent->left = NULL;
+		else
+			parent->right = NULL;
+
+		/* done with the leaf */
+		ops->free(leaf);
 	}
 	else {
-		/* bubble target node to bottom */
+		/* bubble target node to the bottom */
 		leaf = prealloc_unwind(ctxt, node);
 		if (!leaf)
 			return ERR_PTR(-ENOMEM);
 
-		parent = get_parent(leaf);				/* parent is directly available */
-		left_child = is_left_child(leaf->parent);
-
-		/* nodes along this branch may be heavy towards the leaf or balanced
+		/*
+		 * nodes along this branch may be heavy towards the leaf or balanced
 		 * this also applies to its direct parent, if it's leaf-heavy,
-		 * deleting the leaf will propagate the change up the new branch */
+		 * deleting the leaf will propagate the change up the new branch
+		 */
 		prealloc_propagate_change(ctxt, leaf, -1);
+
+		/* parent is directly available */
+		parent = get_parent(leaf);
+
+		/* clear pointer in parent pointing to the leaf */
+		if (is_left_child(leaf->parent))
+			parent->left = NULL;
+		else
+			parent->right = NULL;
+
+		/* this leaf was allocated during unwind, it's not connected to the tree */
 		ops->free(leaf);
+
+		/* fix excessive unbalances introduced by unwind */
+		prealloc = prealloc_fix(ctxt, parent);
+
+		/* no need to retrace if there is no change in height */
+		if (ctxt->diff == 0)
+			return prealloc;
+
+		/* new branch lost height, retrace needed */
+		prealloc = delete_retrace(ctxt, prealloc);
+		if (!prealloc)
+			return ERR_PTR(-ENOMEM);
 	}
-
-	ASSERT(is_new_branch(parent));
-
-	/* clear pointer in parent pointing to the leaf */
-	if (left_child)
-		parent->left = NULL;
-	else
-		parent->right = NULL;
 
 	/* under normal case (root of a subtree being deleted) the subtree is already in AVL form */
 	/* regular bubbling (left or right) is done on an unbalanced node and won't change AVL invariants */
@@ -1562,10 +1590,6 @@ static struct sptree_node *unwind_delete_retrace(struct sptree_ctxt *ctxt, struc
 
 	/* in the corner case of a leaf node being deleted, it is considered that the subtree represented
 	 * by that node decreseas in height, so retrace creates a branch starting with its parent */
-
-	prealloc = delete_retrace(ctxt, parent);
-	if (!prealloc)
-		return ERR_PTR(-ENOMEM);
 
 	return prealloc;
 }
