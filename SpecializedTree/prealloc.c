@@ -1157,8 +1157,14 @@ static struct sptree_node *prealloc_unwind_double(struct sptree_ctxt *ctxt, stru
 	if (!right)
 		return NULL;
 
-	/* choose direction based on the balance of the subtrees
-	 * a rotation will give the new pivot the nearest subtree of the old pivot */
+	/*
+	 * choose direction based on the balance of the subtrees
+	 * a rotation will give the new pivot the nearest subtree of the old pivot
+	 */
+
+	/* common case for the inner nodes, no reason why we do rev. RRL */
+	if (likely(right->balance == 0 && left->balance == 0))
+		return prealloc_reverse_rrl(ctxt, target);
 
 	// reverse RRL
 	if (left->balance == -1)
@@ -1167,10 +1173,6 @@ static struct sptree_node *prealloc_unwind_double(struct sptree_ctxt *ctxt, stru
 	// reverse RLR
 	if (right->balance == 1)
 		return prealloc_reverse_rlr(ctxt, target);
-
-	// don't care: so reverse RRL
-	if (right->balance == 0 && left->balance == 0)
-		return prealloc_reverse_rrl(ctxt, target);
 
 	// poorly balanced case, rebalance left
 	if (right->balance == 0 && left->balance == 1) {
@@ -1497,8 +1499,26 @@ error:
 	return NULL;
 }
 
-/* delete & retrace in a single function */
-/* WARNING: can return NULL as a valid value (check corner case) */
+/* unwind_delete_retrace() - unwind, delete, fix, retrace logic
+ * @ctxt - AVL operations environment
+ * @node - target node to delete
+ *
+ * Under normal case (root of a subtree being deleted) the subtree is already in AVL form.
+ * Regular bubbling (left or right) is done on an unbalanced node and won't change AVL invariants.
+ * Reverse double rotations are done on balanced nodes, and these are the ones that add excessive
+ * unbalancing (and need fixing). Unbalancing points in the direction the target is bubbled!
+ * Under normal circumstances, these unbalancings can be fixed by applying the reverse rotation needed,
+ * but some will be compensated by the removed node and the propagated height diff.
+ *
+ * After fixing, if the subtree loses height, this has to be propagated above by retracing.
+ * Retracing starts at the parent of the subtree being modified (node/new branch)
+ * and may add to the new branch (at the same time it will add to the old nodes chain).
+ *
+ * In the corner case of a leaf node being deleted, it is considered that the subtree represented
+ * by that node decreseas in height, so retrace creates a new branch starting with its parent.
+ *
+ * WARNING: can return NULL as a valid value (check corner case)
+ */
 static struct sptree_node *unwind_delete_retrace(struct sptree_ctxt *ctxt, struct sptree_node *node)
 {
 	struct sptree_ops *ops = ctxt->root->ops;
@@ -1576,20 +1596,6 @@ static struct sptree_node *unwind_delete_retrace(struct sptree_ctxt *ctxt, struc
 		if (!prealloc)
 			return ERR_PTR(-ENOMEM);
 	}
-
-	/* under normal case (root of a subtree being deleted) the subtree is already in AVL form */
-	/* regular bubbling (left or right) is done on an unbalanced node and won't change AVL invariants */
-	/* reverse double rotations are done on balanced nodes, and these are the ones that add excessive
-	 * unbalancing (and need fixing). unbalancing points in the direction the target is bubbled! */
-	/* under normal circumstances, these unbalancings can be fixed by applying the reverse rotation needed,
-	 * but some will be compensated by the removed node and the propagated height diff */
-
-	/* after fixing, if the subtree loses height, this has to be propagated above by retracing */
-	/* retracing starts at the parent of the subtree being modified (node/new branch)
-	 * and may add to the new branch (at the same time it will add to the old nodes chain) */
-
-	/* in the corner case of a leaf node being deleted, it is considered that the subtree represented
-	 * by that node decreseas in height, so retrace creates a branch starting with its parent */
 
 	return prealloc;
 }
