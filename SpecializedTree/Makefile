@@ -4,6 +4,10 @@ ifneq ($(KERNELRELEASE),)
 	obj-m += specialized-tree.o
 	specialized-tree-objs += test.o tree.o prealloc.o
 
+	ccflags-y := -DSPTREE_DEBUG
+	# TODO: also need a build flag that enables the test interface: SPTREE_TEST
+	# TODO: SPTREE_TEST enables SPTREE_DEBUG
+
 	# += -O1 -fno-inline
 
 # Otherwise we were called directly from the command

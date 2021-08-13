@@ -648,16 +648,20 @@ int prealloc_insert(struct sptree_root *root, struct sptree_node *node)
 	struct sptree_node *crnt, *parent;
 	struct sptree_node *prealloc;
 	struct sptree_ctxt ctxt;
-
-	// manual loop-invariant code motion
-	unsigned long node_key = ops->get_key(node);
+	unsigned long node_key;
 	unsigned long crnt_key;
 
 	pr_debug("%s: node "NODE_FMT"\n", __func__, NODE_ARG(root, node));
 	ASSERT(node->balance == 0);
 	ASSERT(is_leaf(node));
 
-	/* look for a parent */
+	if (!validate_avl_balancing(root)) {
+		pr_err("%s: the tree is not in AVL shape\n", __func__);
+		return -EINVAL;
+	}
+
+	/* look for a parent (manual loop-invariant code motion) */
+	node_key = ops->get_key(node);
 	for (crnt = root->root, parent = NULL; crnt != NULL; ) {
 		crnt_key = ops->get_key(crnt);
 
@@ -689,7 +693,6 @@ int prealloc_insert(struct sptree_root *root, struct sptree_node *node)
 	if (!llist_empty(&ctxt.old))
 		prealloc_remove_old(&ctxt);
 
-	// TODO: remove once code stable
 	validate_avl_balancing(root);
 
 	return 0;
@@ -1620,6 +1623,13 @@ struct sptree_node *prealloc_delete(struct sptree_root *root, unsigned long key)
 	struct sptree_node *prealloc;
 	struct sptree_ctxt ctxt;
 
+	pr_debug("%s: key %lx\n", __func__, key);
+
+	if (!validate_avl_balancing(root)) {
+		pr_err("%s: the tree is not in AVL shape\n", __func__);
+		return ERR_PTR(-EINVAL);
+	}
+
 	target = search(root, key);
 	if (!target)
 		return ERR_PTR(-ENXIO);
@@ -1640,7 +1650,6 @@ struct sptree_node *prealloc_delete(struct sptree_root *root, unsigned long key)
 	if (!llist_empty(&ctxt.old))
 		prealloc_remove_old_delete(&ctxt);
 
-	// TODO: remove once code stable
 	validate_avl_balancing(root);
 
 	return target;

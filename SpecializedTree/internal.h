@@ -4,7 +4,16 @@
 
 #include "tree.h"
 
+#ifdef SPTREE_DEBUG
 #define ASSERT(_expr) BUG_ON(!(_expr))
+extern bool validate_avl_balancing(struct sptree_root *root);
+#else /* SPTREE_DEBUG */
+#define ASSERT(_expr)
+static inline bool validate_avl_balancing(struct sptree_root *root)
+{
+	return true;
+}
+#endif /* SPTREE_DEBUG */
 
 /* context for insert/delete operations */
 struct sptree_ctxt {
@@ -100,7 +109,5 @@ extern struct sptree_node *prealloc_top(struct sptree_ctxt *ctxt, struct sptree_
 void prealloc_connect(struct sptree_root *root, struct sptree_node *branch);
 extern void prealloc_remove_old(struct sptree_ctxt *ctxt);
 extern void _delete_prealloc(struct sptree_ctxt *ctxt, struct sptree_node *prealloc);
-
-extern void validate_avl_balancing(struct sptree_root *root);
 
 #endif /* _SPTREE_INTERNAL_H_ */

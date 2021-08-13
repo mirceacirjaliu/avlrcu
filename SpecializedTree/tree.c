@@ -37,45 +37,54 @@ void sptree_free(struct sptree_root *root)
 }
 
 
+#ifdef SPTREE_DEBUG
 
-// TODO: debug purposes only, remove once code is stable
 // checks the AVL condition for subtree depths
-static int validate_subtree_balancing(struct sptree_root *root, struct sptree_node *node)
+static int validate_subtree_balancing(struct sptree_root *root, struct sptree_node *node, bool *valid)
 {
 	int left_depth = 0;
 	int right_depth = 0;
 	int diff;
 
 	if (node->left)
-		left_depth = validate_subtree_balancing(root, node->left);
+		left_depth = validate_subtree_balancing(root, node->left, valid);
 
 	if (node->right)
-		right_depth = validate_subtree_balancing(root, node->right);
+		right_depth = validate_subtree_balancing(root, node->right, valid);
 
 	diff = right_depth - left_depth;
 
 	// check for balance outside [-1..1]
-	if (diff < -1 || diff > 1)
+	if (diff < -1 || diff > 1) {
 		pr_warn("%s: excessive balance on "NODE_FMT", left depth %d, right depth %d\n",
 			__func__, NODE_ARG(root, node), left_depth, right_depth);
+		*valid = false;
+	}
 
 	// check if the algorithm computed the balance right
-	if (diff != node->balance)
+	if (diff != node->balance) {
 		pr_err("%s: wrong balance factor on "NODE_FMT", left depth %d, right depth %d\n",
 			__func__, NODE_ARG(root, node), left_depth, right_depth);
+		*valid = false;
+	}
 
 	// return the depth of the subtree rooted at node
 	return max(left_depth, right_depth) + 1;
 }
 
-void validate_avl_balancing(struct sptree_root *root)
+bool validate_avl_balancing(struct sptree_root *root)
 {
+	bool valid = true;
+
 	if (root->root)
-		validate_subtree_balancing(root, root->root);
+		validate_subtree_balancing(root, root->root, &valid);
+
+	return valid;
 }
 
+#endif /* SPTREE_DEBUG */
 
-// search for the node containing this address
+
 struct sptree_node *search(struct sptree_root *root, unsigned long key)
 {
 	struct sptree_ops *ops = root->ops;
@@ -500,6 +509,11 @@ int test_unwind(struct sptree_root *root, unsigned long key)
 		return -EINVAL;
 	}
 
+	if (!validate_avl_balancing(root)) {
+		pr_err("%s: the tree is not in AVL shape\n", __func__);
+		return -EINVAL;
+	}
+
 	sptree_ctxt_init(&ctxt, root);
 
 	// the unwind function returns the bottom of the preallocated branch
@@ -517,7 +531,6 @@ int test_unwind(struct sptree_root *root, unsigned long key)
 	if (!llist_empty(&ctxt.old))
 		prealloc_remove_old(&ctxt);
 
-	// TODO: remove once code stable
 	validate_avl_balancing(root);
 
 	return 0;
