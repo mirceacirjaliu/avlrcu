@@ -25,7 +25,6 @@ struct sptree_ops {
 	struct sptree_node *(*alloc)(void);
 	void (*free)(struct sptree_node *);
 	void (*free_rcu)(struct sptree_node *);
-	unsigned long (*get_key)(const struct sptree_node *);
 	int (*cmp)(const struct sptree_node *, const struct sptree_node *);
 	void (*copy)(struct sptree_node *, struct sptree_node *);
 };
@@ -38,7 +37,6 @@ struct sptree_root {
 // TODO: another filter function will be needed for walking
 // over intervals. This will have to be given to the iterator !?
 
-// TODO: remove all pr_debug()s and the get_key() callback !!!
 // TODO: revert delete leaf code to fake_leaf logic
 
 /**

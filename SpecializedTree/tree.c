@@ -11,12 +11,11 @@
 
 #include "internal.h"
 
+// TODO: make void
 int sptree_init(struct sptree_root *root, struct sptree_ops *ops)
 {
 	root->ops = ops;
 	root->root = NULL;
-
-	pr_debug("%s: created empty root\n", __func__);
 
 	return 0;
 }
@@ -40,31 +39,31 @@ void sptree_free(struct sptree_root *root)
 #ifdef SPTREE_DEBUG
 
 // checks the AVL condition for subtree depths
-static int validate_subtree_balancing(struct sptree_root *root, struct sptree_node *node, bool *valid)
+static int validate_subtree_balancing(struct sptree_node *node, bool *valid)
 {
 	int left_depth = 0;
 	int right_depth = 0;
 	int diff;
 
 	if (node->left)
-		left_depth = validate_subtree_balancing(root, node->left, valid);
+		left_depth = validate_subtree_balancing(node->left, valid);
 
 	if (node->right)
-		right_depth = validate_subtree_balancing(root, node->right, valid);
+		right_depth = validate_subtree_balancing(node->right, valid);
 
 	diff = right_depth - left_depth;
 
 	// check for balance outside [-1..1]
 	if (diff < -1 || diff > 1) {
 		pr_warn("%s: excessive balance on "NODE_FMT", left depth %d, right depth %d\n",
-			__func__, NODE_ARG(root, node), left_depth, right_depth);
+			__func__, NODE_ARG(node), left_depth, right_depth);
 		*valid = false;
 	}
 
 	// check if the algorithm computed the balance right
 	if (diff != node->balance) {
 		pr_err("%s: wrong balance factor on "NODE_FMT", left depth %d, right depth %d\n",
-			__func__, NODE_ARG(root, node), left_depth, right_depth);
+			__func__, NODE_ARG(node), left_depth, right_depth);
 		*valid = false;
 	}
 
@@ -77,7 +76,7 @@ bool validate_avl_balancing(struct sptree_root *root)
 	bool valid = true;
 
 	if (root->root)
-		validate_subtree_balancing(root, root->root, &valid);
+		validate_subtree_balancing(root->root, &valid);
 
 	return valid;
 }
@@ -98,8 +97,6 @@ struct sptree_node *search(struct sptree_root *root, const struct sptree_node *m
 	struct sptree_ops *ops = root->ops;
 	struct sptree_node *crnt;
 	int result;
-
-	pr_debug("%s: look for "NODE_FMT"\n", __func__, NODE_ARG(root, match));
 
 	crnt = rcu_access_pointer(root->root);
 	while (crnt) {
@@ -295,7 +292,7 @@ int test_ror(struct sptree_root *root, const struct sptree_node *match)
 
 	pivot = target->left;
 	if (!pivot) {
-		pr_err("%s: we don't have a pivot for "NODE_FMT"\n", __func__, NODE_ARG(root, target));
+		pr_err("%s: node "NODE_FMT" is too low\n", __func__, NODE_ARG(target));
 		return -EINVAL;
 	}
 
@@ -350,7 +347,7 @@ int test_rol(struct sptree_root *root, const struct sptree_node *match)
 
 	pivot = target->right;
 	if (!pivot) {
-		pr_err("%s: we don't have a pivot for "NODE_FMT"\n", __func__, NODE_ARG(root, target));
+		pr_err("%s: node "NODE_FMT" is too low\n", __func__, NODE_ARG(target));
 		return -EINVAL;
 	}
 
@@ -407,12 +404,12 @@ int test_rrl(struct sptree_root *root, const struct sptree_node *match)
 		return -ENXIO;
 
 	if (!target->right) {
-		pr_err("%s: node "NODE_FMT" is too low\n", __func__, NODE_ARG(root, target));
+		pr_err("%s: node "NODE_FMT" is too low\n", __func__, NODE_ARG(target));
 		return -EINVAL;
 	}
 
 	if (!target->right->left) {
-		pr_err("%s: node "NODE_FMT" is too low\n", __func__, NODE_ARG(root, target));
+		pr_err("%s: node "NODE_FMT" is too low\n", __func__, NODE_ARG(target));
 		return -EINVAL;
 	}
 
@@ -469,12 +466,12 @@ int test_rlr(struct sptree_root *root, const struct sptree_node *match)
 		return -ENXIO;
 
 	if (!target->left) {
-		pr_err("%s: node "NODE_FMT" is too low\n", __func__, NODE_ARG(root, target));
+		pr_err("%s: node "NODE_FMT" is too low\n", __func__, NODE_ARG(target));
 		return -EINVAL;
 	}
 
 	if (!target->left->right) {
-		pr_err("%s: node "NODE_FMT" is too low\n", __func__, NODE_ARG(root, target));
+		pr_err("%s: node "NODE_FMT" is too low\n", __func__, NODE_ARG(target));
 		return -EINVAL;
 	}
 
@@ -508,7 +505,7 @@ int test_unwind(struct sptree_root *root, const struct sptree_node *match)
 		return -ENXIO;
 
 	if (is_leaf(target)) {
-		pr_err("%s: node "NODE_FMT" already a leaf\n", __func__, NODE_ARG(root, target));
+		pr_err("%s: node "NODE_FMT" already a leaf\n", __func__, NODE_ARG(target));
 		return -EINVAL;
 	}
 

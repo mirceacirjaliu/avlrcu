@@ -66,14 +66,6 @@ static void test_free_rcu(struct sptree_node *node)
 
 }
 
-static unsigned long test_get_key(const struct sptree_node *node)
-{
-	struct test_sptree_node *container;
-	container = sptree_entry(node, struct test_sptree_node, node);
-
-	return container->address;
-}
-
 static int test_cmp(const struct sptree_node *match, const struct sptree_node *crnt)
 {
 	struct test_sptree_node *container_match;
@@ -101,7 +93,6 @@ static struct sptree_ops test_ops = {
 	.alloc = test_alloc,
 	.free = test_free,
 	.free_rcu = test_free_rcu,
-	.get_key = test_get_key,
 	.cmp = test_cmp,
 	.copy = test_copy,
 };
