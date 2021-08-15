@@ -19,6 +19,7 @@ static inline bool validate_avl_balancing(struct sptree_root *root)
 struct sptree_ctxt {
 	struct sptree_root *root;
 	struct llist_head old;
+	struct sptree_node *removed;
 	int diff;
 };
 
