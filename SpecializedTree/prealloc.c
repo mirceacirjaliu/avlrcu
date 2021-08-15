@@ -234,7 +234,7 @@ void prealloc_remove_old(struct sptree_ctxt *ctxt)
  * prealloc_remove_old() - remove (RCU) nodes replaced by the new branch
  * @ctxt:	AVL operations environment (contains ops & the old nodes chain).
  *
- * All nodes in the old chain will be passed to RCU for deletion.
+ * Almost all nodes in the old chain will be passed to RCU for deletion.
  * This is the version used in the delete function. The node matching the key
  * will be the first one that is replaced by the unwind logic and will be found
  * at the end of the old chain. Skip this node, it will be handed to the user.
@@ -247,7 +247,7 @@ static void prealloc_remove_old_delete(struct sptree_ctxt *ctxt)
 
 	node = __llist_del_all(&ctxt->old);
 	node = llist_reverse_order(node);
-	node = node->next;
+	node = node->next;	/* skip first */
 	llist_for_each_entry_safe(old, temp, node, old)
 		ops->free_rcu(old);
 }
@@ -1465,17 +1465,18 @@ static struct sptree_node *unwind_delete_retrace(struct sptree_ctxt *ctxt, struc
 	struct sptree_node *parent;
 
 	if (is_leaf(node)) {
+		struct sptree_node fake_leaf;
+
+		__llist_add(&node->old, &ctxt->old);		/* add to chain of old nodes */
+
 		/* if that node is the only node in the tree, the new branch is empty (NULL) */
-		if (is_root(node->parent)) {
-			__llist_add(&node->old, &ctxt->old);		/* add to chain of old nodes */
-
+		if (is_root(node->parent))
 			return NULL;
-		}
 
-		/* duplicate the leaf for the functions to work */
-		leaf = prealloc_replace(ctxt, node);
-		if (!leaf)
-			return ERR_PTR(-ENOMEM);
+		/* this fake leaf helps kick-start the new branch for retrace */
+		memcpy(&fake_leaf, node, sizeof(struct sptree_node));
+		fake_leaf.new_branch = 1;
+		leaf = &fake_leaf;
 
 		/* retrace does not work on modified ancestor balance factors */
 		ctxt->diff = -1;
@@ -1494,9 +1495,6 @@ static struct sptree_node *unwind_delete_retrace(struct sptree_ctxt *ctxt, struc
 			parent->left = NULL;
 		else
 			parent->right = NULL;
-
-		/* done with the leaf */
-		ops->free(leaf);
 	}
 	else {
 		/* bubble target node to the bottom */
@@ -1522,6 +1520,11 @@ static struct sptree_node *unwind_delete_retrace(struct sptree_ctxt *ctxt, struc
 
 		/* this leaf was allocated during unwind, it's not connected to the tree */
 		ops->free(leaf);
+		// TODO: what if I return leaf to the user ?!
+		// TODO: leaf is a copy of the original target
+		// TODO: return it somewhere in the ctxt
+		// TODO: same for the first branch (return node directly)
+		// TODO: then I can delete prealloc_remove_old_delete()
 
 		/* fix excessive unbalances introduced by unwind */
 		prealloc = prealloc_fix(ctxt, parent);

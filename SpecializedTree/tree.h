@@ -37,8 +37,6 @@ struct sptree_root {
 // TODO: another filter function will be needed for walking
 // over intervals. This will have to be given to the iterator !?
 
-// TODO: revert delete leaf code to fake_leaf logic
-
 /**
  * sptree_entry - get the struct for this entry
  * @ptr:	the &struct sptree_node pointer.
