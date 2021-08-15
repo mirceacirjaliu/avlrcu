@@ -74,6 +74,18 @@ static unsigned long test_get_key(const struct sptree_node *node)
 	return container->address;
 }
 
+static int test_cmp(const struct sptree_node *match, const struct sptree_node *crnt)
+{
+	struct test_sptree_node *container_match;
+	struct test_sptree_node *container_crnt;
+
+	container_match = sptree_entry(match, struct test_sptree_node, node);
+	container_crnt = sptree_entry(crnt, struct test_sptree_node, node);
+
+	// watch out for truncation !!
+	return (int)((long)container_match->address - (long)container_crnt->address);
+}
+
 static void test_copy(struct sptree_node *to, struct sptree_node *from)
 {
 	struct test_sptree_node *container_to;
@@ -90,6 +102,7 @@ static struct sptree_ops test_ops = {
 	.free = test_free,
 	.free_rcu = test_free_rcu,
 	.get_key = test_get_key,
+	.cmp = test_cmp,
 	.copy = test_copy,
 };
 
@@ -183,21 +196,21 @@ static ssize_t insert_map(struct file *file, const char __user *data, size_t cou
 
 static ssize_t delete_map(struct file *file, const char __user *data, size_t count, loff_t *offs)
 {
-	unsigned long value;
+	struct test_sptree_node match;
 	struct sptree_node *node;
 	struct test_sptree_node *container;
 	int result;
 
-	result = kstrtoul_from_user(data, count, 16, &value);
+	result = kstrtoul_from_user(data, count, 16, &match.address);
 	if (IS_ERR_VALUE((long)result))
 		return result;
 
-	pr_debug("%s: at %lx\n", __func__, value);
+	pr_debug("%s: at %lx\n", __func__, match.address);
 
 	/* these have to match with the allocation functions */
 	spin_lock(&lock);
 
-	node = prealloc_delete(&sptree_range, value);
+	node = prealloc_delete(&sptree_range, &match.node);
 
 	spin_unlock(&lock);
 
@@ -224,19 +237,19 @@ static ssize_t delete_map(struct file *file, const char __user *data, size_t cou
 
 static ssize_t unwind_map(struct file *file, const char __user *data, size_t count, loff_t *offs)
 {
-	unsigned long value;
+	struct test_sptree_node match;
 	int result;
 
-	result = kstrtoul_from_user(data, count, 16, &value);
+	result = kstrtoul_from_user(data, count, 16, &match.address);
 	if (IS_ERR_VALUE((long)result))
 		return result;
 
-	pr_debug("%s: at %lx\n", __func__, value);
+	pr_debug("%s: at %lx\n", __func__, match.address);
 
 	/* these have to match with the allocation functions */
 	spin_lock(&lock);
 
-	result = test_unwind(&sptree_range, value);
+	result = test_unwind(&sptree_range, &match.node);
 
 	spin_unlock(&lock);
 
@@ -266,19 +279,19 @@ static ssize_t clear_map(struct file *file, const char __user *data, size_t coun
 
 static ssize_t ror_map(struct file *file, const char __user *data, size_t count, loff_t *offs)
 {
-	unsigned long value;
+	struct test_sptree_node match;
 	int result;
 
-	result = kstrtoul_from_user(data, count, 16, &value);
+	result = kstrtoul_from_user(data, count, 16, &match.address);
 	if (IS_ERR_VALUE((long)result))
 		return result;
 
-	pr_debug("%s: at %lx\n", __func__, value);
+	pr_debug("%s: at %lx\n", __func__, match.address);
 
 	/* these have to match with the allocation functions */
 	spin_lock(&lock);
 
-	result = test_ror(&sptree_range, value);
+	result = test_ror(&sptree_range, &match.node);
 
 	spin_unlock(&lock);
 
@@ -294,19 +307,19 @@ static ssize_t ror_map(struct file *file, const char __user *data, size_t count,
 
 static ssize_t rol_map(struct file *file, const char __user *data, size_t count, loff_t *offs)
 {
-	unsigned long value;
+	struct test_sptree_node match;
 	int result;
 
-	result = kstrtoul_from_user(data, count, 16, &value);
+	result = kstrtoul_from_user(data, count, 16, &match.address);
 	if (IS_ERR_VALUE((long)result))
 		return result;
 
-	pr_debug("%s: at %lx\n", __func__, value);
+	pr_debug("%s: at %lx\n", __func__, match.address);
 
 	/* these have to match with the allocation functions */
 	spin_lock(&lock);
 
-	result = test_rol(&sptree_range, value);
+	result = test_rol(&sptree_range, &match.node);
 
 	spin_unlock(&lock);
 
@@ -322,19 +335,19 @@ static ssize_t rol_map(struct file *file, const char __user *data, size_t count,
 
 static ssize_t rrl_map(struct file *file, const char __user *data, size_t count, loff_t *offs)
 {
-	unsigned long value;
+	struct test_sptree_node match;
 	int result;
 
-	result = kstrtoul_from_user(data, count, 16, &value);
+	result = kstrtoul_from_user(data, count, 16, &match.address);
 	if (IS_ERR_VALUE((long)result))
 		return result;
 
-	pr_debug("%s: at %lx\n", __func__, value);
+	pr_debug("%s: at %lx\n", __func__, match.address);
 
 	/* these have to match with the allocation functions */
 	spin_lock(&lock);
 
-	result = test_rrl(&sptree_range, value);
+	result = test_rrl(&sptree_range, &match.node);
 
 	spin_unlock(&lock);
 
@@ -350,19 +363,19 @@ static ssize_t rrl_map(struct file *file, const char __user *data, size_t count,
 
 static ssize_t rlr_map(struct file *file, const char __user *data, size_t count, loff_t *offs)
 {
-	unsigned long value;
+	struct test_sptree_node match;
 	int result;
 
-	result = kstrtoul_from_user(data, count, 16, &value);
+	result = kstrtoul_from_user(data, count, 16, &match.address);
 	if (IS_ERR_VALUE((long)result))
 		return result;
 
-	pr_debug("%s: at %lx\n", __func__, value);
+	pr_debug("%s: at %lx\n", __func__, match.address);
 
 	/* these have to match with the allocation functions */
 	spin_lock(&lock);
 
-	result = test_rlr(&sptree_range, value);
+	result = test_rlr(&sptree_range, &match.node);
 
 	spin_unlock(&lock);
 

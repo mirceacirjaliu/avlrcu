@@ -26,6 +26,7 @@ struct sptree_ops {
 	void (*free)(struct sptree_node *);
 	void (*free_rcu)(struct sptree_node *);
 	unsigned long (*get_key)(const struct sptree_node *);
+	int (*cmp)(const struct sptree_node *, const struct sptree_node *);
 	void (*copy)(struct sptree_node *, struct sptree_node *);
 };
 
@@ -34,7 +35,11 @@ struct sptree_root {
 	struct sptree_node __rcu *root;
 };
 
+// TODO: another filter function will be needed for walking
+// over intervals. This will have to be given to the iterator !?
 
+// TODO: remove all pr_debug()s and the get_key() callback !!!
+// TODO: revert delete leaf code to fake_leaf logic
 
 /**
  * sptree_entry - get the struct for this entry
@@ -105,16 +110,16 @@ extern int sptree_init(struct sptree_root *root, struct sptree_ops *ops);
 /* write-side calls, must be protected by a lock */
 extern void sptree_free(struct sptree_root *root);
 extern int prealloc_insert(struct sptree_root *root, struct sptree_node *node);
-extern struct sptree_node *prealloc_delete(struct sptree_root *root, unsigned long key);
+extern struct sptree_node *prealloc_delete(struct sptree_root *root, const struct sptree_node *match);
 
 /* test functions, also write-side calls, must be protected by a lock */
-extern int test_unwind(struct sptree_root *root, unsigned long key);
-extern int test_ror(struct sptree_root *root, unsigned long key);
-extern int test_rol(struct sptree_root *root, unsigned long key);
-extern int test_rrl(struct sptree_root *root, unsigned long key);
-extern int test_rlr(struct sptree_root *root, unsigned long key);
+extern int test_unwind(struct sptree_root *root, const struct sptree_node *match);
+extern int test_ror(struct sptree_root *root, const struct sptree_node *match);
+extern int test_rol(struct sptree_root *root, const struct sptree_node *match);
+extern int test_rrl(struct sptree_root *root, const struct sptree_node *match);
+extern int test_rlr(struct sptree_root *root, const struct sptree_node *match);
 
 /* read-side calls, must be protected by (S)RCU section */
-extern struct sptree_node *search(struct sptree_root *root, unsigned long key);
+extern struct sptree_node *search(struct sptree_root *root, const struct sptree_node *match);
 
 #endif /* _SPECIALIZED_TREE_H_ */

@@ -84,31 +84,34 @@ bool validate_avl_balancing(struct sptree_root *root)
 
 #endif /* SPTREE_DEBUG */
 
-
-struct sptree_node *search(struct sptree_root *root, unsigned long key)
+/**
+ * search() - search for an object in the tree
+ * @root	root of the tree
+ * @match	node to match against
+ *
+ * Uses the cmp() callback to compare the equivalent object to objects in the tree.
+ * The cmp() callback has the same semantics as memcmp().
+ * If a match is found, it is returned.
+ */
+struct sptree_node *search(struct sptree_root *root, const struct sptree_node *match)
 {
 	struct sptree_ops *ops = root->ops;
 	struct sptree_node *crnt;
-	unsigned long crnt_key;
+	int result;
 
-	pr_debug("%s: looking for %lx\n", __func__, key);
+	pr_debug("%s: look for "NODE_FMT"\n", __func__, NODE_ARG(root, match));
 
 	crnt = rcu_access_pointer(root->root);
 	while (crnt) {
-		crnt_key = ops->get_key(crnt);
+		result = ops->cmp(match, crnt);
 
-		if (key == crnt_key)
+		if (result == 0)
 			break;
-		else if (key < crnt_key)
+		else if (result < 0)
 			crnt = rcu_access_pointer(crnt->left);
 		else
 			crnt = rcu_access_pointer(crnt->right);
 	}
-
-	if (crnt == NULL)
-		pr_debug("%s: found nothing\n", __func__);
-	else
-		pr_debug("%s: found inside "NODE_FMT"\n", __func__, NODE_ARG(root, crnt));
 
 	return crnt;
 }
@@ -279,14 +282,14 @@ error:
 	return NULL;
 }
 
-int test_ror(struct sptree_root *root, unsigned long addr)
+int test_ror(struct sptree_root *root, const struct sptree_node *match)
 {
 	struct sptree_node *target;
 	struct sptree_node *pivot;
 	struct sptree_node *prealloc;
 	struct sptree_ctxt ctxt;
 
-	target = search(root, addr);
+	target = search(root, match);
 	if (!target)
 		return -ENXIO;
 
@@ -334,14 +337,14 @@ error:
 	return NULL;
 }
 
-int test_rol(struct sptree_root *root, unsigned long addr)
+int test_rol(struct sptree_root *root, const struct sptree_node *match)
 {
 	struct sptree_node *target;
 	struct sptree_node *pivot;
 	struct sptree_node *prealloc;
 	struct sptree_ctxt ctxt;
 
-	target = search(root, addr);
+	target = search(root, match);
 	if (!target)
 		return -ENXIO;
 
@@ -393,13 +396,13 @@ error:
 	return NULL;
 }
 
-int test_rrl(struct sptree_root *root, unsigned long addr)
+int test_rrl(struct sptree_root *root, const struct sptree_node *match)
 {
 	struct sptree_node *target;
 	struct sptree_node *prealloc;
 	struct sptree_ctxt ctxt;
 
-	target = search(root, addr);
+	target = search(root, match);
 	if (!target)
 		return -ENXIO;
 
@@ -455,13 +458,13 @@ error:
 	return NULL;
 }
 
-int test_rlr(struct sptree_root *root, unsigned long addr)
+int test_rlr(struct sptree_root *root, const struct sptree_node *match)
 {
 	struct sptree_node *target;
 	struct sptree_node *prealloc;
 	struct sptree_ctxt ctxt;
 
-	target = search(root, addr);
+	target = search(root, match);
 	if (!target)
 		return -ENXIO;
 
@@ -494,13 +497,13 @@ int test_rlr(struct sptree_root *root, unsigned long addr)
 	return 0;
 }
 
-int test_unwind(struct sptree_root *root, unsigned long key)
+int test_unwind(struct sptree_root *root, const struct sptree_node *match)
 {
 	struct sptree_node *target;
 	struct sptree_node *prealloc;
 	struct sptree_ctxt ctxt;
 
-	target = search(root, key);
+	target = search(root, match);
 	if (!target)
 		return -ENXIO;
 

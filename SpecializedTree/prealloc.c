@@ -167,6 +167,9 @@ struct sptree_node *prealloc_next_rin(struct sptree_node *node)
  * - a single node or a branch for insertion
  * - a single node or a subtree for deletion
  *
+ * TODO: what is reverse-post-order (RLN) ??
+ * TODO: optimize this func to clear the new branch flag in the same iteration ??
+ *
  * The connections must be made in reverse-post-order (RLN), clockwise,
  * starting from the rightmost node of the new branch and finishing at root,
  * so when an in-order tree walk returns from a connected subtree,
@@ -630,17 +633,16 @@ error:
 	return NULL;
 };
 
-/*
+/**
  * prealloc_insert() - insert new node into the tree
  * @root - the root of the tree
  * @node - the new node to be added
  *
- * The container of the node must be allocated & compatible with deletion callback.
- * The node must be zeroed before insertion.
+ * The object containing the node must be allocated & compatible with the deletion callback.
+ * The object starts a new branch that gets connected to the tree after retrace.
+ * WARNING: The node must be zeroed before insertion.
  *
- * If insertion succeeds, the container may already be deleted by the time this
- * function exits, so usage of the whole structure is invalid after insertion.
- * If insertion fails, it is the task of the user to delete the container.
+ * Returns 0 on success or an error code.
  */
 int prealloc_insert(struct sptree_root *root, struct sptree_node *node)
 {
@@ -648,8 +650,7 @@ int prealloc_insert(struct sptree_root *root, struct sptree_node *node)
 	struct sptree_node *crnt, *parent;
 	struct sptree_node *prealloc;
 	struct sptree_ctxt ctxt;
-	unsigned long node_key;
-	unsigned long crnt_key;
+	int result;
 
 	pr_debug("%s: node "NODE_FMT"\n", __func__, NODE_ARG(root, node));
 	ASSERT(node->balance == 0);
@@ -660,14 +661,13 @@ int prealloc_insert(struct sptree_root *root, struct sptree_node *node)
 		return -EINVAL;
 	}
 
-	/* look for a parent (manual loop-invariant code motion) */
-	node_key = ops->get_key(node);
+	/* look for a parent */
 	for (crnt = root->root, parent = NULL; crnt != NULL; ) {
-		crnt_key = ops->get_key(crnt);
+		result = ops->cmp(node, crnt);
 
-		if (unlikely(node_key == crnt_key))
-			return -EINVAL;
-		else if (node_key < crnt_key) {
+		if (unlikely(result == 0))
+			return -EALREADY;
+		else if (result < 0) {
 			parent = make_left(crnt);
 			crnt = crnt->left;
 		}
@@ -1603,34 +1603,35 @@ static struct sptree_node *unwind_delete_retrace(struct sptree_ctxt *ctxt, struc
 	return prealloc;
 }
 
-/*
+/**
  * prealloc_delete() - delete a node from the tree
  * @root - root of the tree
- * @key - key of the node to delete
+ * @match - node to match against
+ *
+ * Looks in the tree for the node corresponding to the match node and extracts it.
+ * The node may still be used by readers, so it's the duty of the user to free it
+ * after waiting for a grace period to elapse.
  *
  * Returns:	the extracted node on success
  *		-ENXIO - node was not found
  *		-ENOMEM - allocations failed
  *
  * On error, the tree is not modified.
- * Returns the node corresponding to the key, after extracting it from the tree.
- * The node may still be used by readers, so it's the duty of the user to free it
- * after waiting for a grace period to elapse.
  */
-struct sptree_node *prealloc_delete(struct sptree_root *root, unsigned long key)
+struct sptree_node *prealloc_delete(struct sptree_root *root, const struct sptree_node *match)
 {
 	struct sptree_node *target;
 	struct sptree_node *prealloc;
 	struct sptree_ctxt ctxt;
 
-	pr_debug("%s: key %lx\n", __func__, key);
+	pr_debug("%s: look for "NODE_FMT"\n", __func__, NODE_ARG(root, match));
 
 	if (!validate_avl_balancing(root)) {
 		pr_err("%s: the tree is not in AVL shape\n", __func__);
 		return ERR_PTR(-EINVAL);
 	}
 
-	target = search(root, key);
+	target = search(root, match);
 	if (!target)
 		return ERR_PTR(-ENXIO);
 
