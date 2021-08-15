@@ -11,15 +11,19 @@
 
 #include "internal.h"
 
-// TODO: make void
-int sptree_init(struct sptree_root *root, struct sptree_ops *ops)
+void sptree_init(struct sptree_root *root, struct sptree_ops *ops)
 {
 	root->ops = ops;
 	root->root = NULL;
-
-	return 0;
 }
 
+/**
+ * sptree_free() - deletes all the nodes in the tree
+ * @root	root of the tree
+ *
+ * This is a write-side call and must be protected by a lock.
+ * All nodes are posted to RCU for deletion.
+ */
 void sptree_free(struct sptree_root *root)
 {
 	struct sptree_ops *ops = root->ops;
@@ -30,11 +34,14 @@ void sptree_free(struct sptree_root *root)
 	temp_root.root = root->root;
 	rcu_assign_pointer(root->root, NULL);
 
-	/* schedule all the nodes for deletion */
-	sptree_for_each(node, &temp_root)
+	/*
+	 * schedule all the nodes for deletion
+	 * use post-order walk to avoid nodes getting freed and links getting
+	 * broken if this iteration intersects the end of a grace period
+	 */
+	sptree_for_each_po(node, &temp_root)
 		ops->free_rcu(node);
 }
-
 
 #ifdef SPTREE_DEBUG
 

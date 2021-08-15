@@ -103,7 +103,7 @@ extern struct sptree_node *sptree_next_po(struct sptree_node *node);
 	     pos && ({ n = sptree_next_po(pos); 1; });	\
 	     pos = sptree_next_po(n))
 
-extern int sptree_init(struct sptree_root *root, struct sptree_ops *ops);
+extern void sptree_init(struct sptree_root *root, struct sptree_ops *ops);
 
 /* write-side calls, must be protected by a lock */
 extern void sptree_free(struct sptree_root *root);

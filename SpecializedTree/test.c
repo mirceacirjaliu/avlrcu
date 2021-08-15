@@ -680,10 +680,7 @@ static int __init sptree_test_init(void)
 {
 	int result;
 
-	// create the sptree_range: 4KB - 1MB
-	result = sptree_init(&sptree_range, &test_ops);
-	if (result)
-		return result;
+	sptree_init(&sptree_range, &test_ops);
 
 	// create access files
 	result = sptree_debugfs_init();
