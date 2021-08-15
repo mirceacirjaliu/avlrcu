@@ -27,7 +27,7 @@ void sptree_init(struct sptree_root *root, struct sptree_ops *ops)
 void sptree_free(struct sptree_root *root)
 {
 	struct sptree_ops *ops = root->ops;
-	struct sptree_node *node;
+	struct sptree_node *node, *temp;
 	struct sptree_root temp_root;
 
 	/* cut access to the tree */
@@ -39,7 +39,7 @@ void sptree_free(struct sptree_root *root)
 	 * use post-order walk to avoid nodes getting freed and links getting
 	 * broken if this iteration intersects the end of a grace period
 	 */
-	sptree_for_each_po(node, &temp_root)
+	sptree_for_each_po_safe(node, temp, &temp_root)
 		ops->free_rcu(node);
 }
 

@@ -35,7 +35,7 @@ static struct sptree_node *prealloc_left_deepest(struct sptree_node *node)
 	}
 }
 
-static struct sptree_node *prealloc_next_postorder(struct sptree_node *node)
+static struct sptree_node *prealloc_next_po(struct sptree_node *node)
 {
 	struct sptree_node *parent;
 
@@ -56,7 +56,7 @@ static struct sptree_node *prealloc_next_postorder(struct sptree_node *node)
 }
 
 /* the preallocated branch/subtree doesn't have a root, just a root node */
-static struct sptree_node *prealloc_first_postorder(struct sptree_node *node)
+static struct sptree_node *prealloc_first_po(struct sptree_node *node)
 {
 	if (!node)
 		return NULL;
@@ -68,14 +68,14 @@ static struct sptree_node *prealloc_first_postorder(struct sptree_node *node)
 
 /* iterate post-order only on the preallocated branch */
 #define sptree_for_each_prealloc_po(pos, root)	\
-	for (pos = prealloc_first_postorder(root);	\
+	for (pos = prealloc_first_po(root);	\
 	     pos;					\
-	     pos = prealloc_next_postorder(pos))
+	     pos = prealloc_next_po(pos))
 
 #define sptree_for_each_prealloc_po_safe(pos, n, root)		\
-	for (pos = prealloc_first_postorder(root);		\
-	     pos && ({ n = prealloc_next_postorder(pos); 1; });	\
-	     pos = prealloc_next_postorder(n))
+	for (pos = prealloc_first_po(root);		\
+	     pos && ({ n = prealloc_next_po(pos); 1; });	\
+	     pos = prealloc_next_po(n))
 
 /*
  * _delete_prealloc() - delete prealloc branch/subtree in case of failure
@@ -99,7 +99,6 @@ void _delete_prealloc(struct sptree_ctxt *ctxt, struct sptree_node *prealloc)
 		ops->free(node);
 	}
 }
-
 
 /* reverse-in-order iteration on the new branch */
 static struct sptree_node *prealloc_rightmost_rin(struct sptree_node *node)
@@ -133,6 +132,15 @@ static struct sptree_node *prealloc_successor_rin(struct sptree_node *node)
 	}
 }
 
+struct sptree_node *prealloc_next_rin(struct sptree_node *node)
+{
+	/* reverse-in-order RNL -> next is left */
+	if (node->left && is_new_branch(node->left))
+		return prealloc_rightmost_rin(node->left);
+
+	return prealloc_successor_rin(node);
+}
+
 /* the preallocated branch/subtree doesn't have a root, just a root node */
 static struct sptree_node *prealloc_first_rin(struct sptree_node *node)
 {
@@ -144,15 +152,6 @@ static struct sptree_node *prealloc_first_rin(struct sptree_node *node)
 	return prealloc_rightmost_rin(node);
 }
 
-struct sptree_node *prealloc_next_rin(struct sptree_node *node)
-{
-	/* reverse-in-order RNL -> next is left */
-	if (node->left && is_new_branch(node->left))
-		return prealloc_rightmost_rin(node->left);
-
-	return prealloc_successor_rin(node);
-}
-
 #define sptree_for_each_prealloc_rin(pos, root)	\
 	for (pos = prealloc_first_rin(root);	\
 	     pos != NULL;			\
@@ -160,17 +159,15 @@ struct sptree_node *prealloc_next_rin(struct sptree_node *node)
 
 /**
  * prealloc_connect() - insert the new branch in a tree
- * @pbranch:	The place where new branch will be connected
- * @branch:	The root of the new branch/subtree
+ * @root	root of the tree
+ * @branch	preallocated branch
  *
  * Used on insertion/deletion. The new branch can be:
  * - a single node or a branch for insertion
  * - a single node or a subtree for deletion
+ * The branch can not be NULL. For this we have the function below.
  *
- * TODO: what is reverse-post-order (RLN) ??
- * TODO: optimize this func to clear the new branch flag in the same iteration ??
- *
- * The connections must be made in reverse-post-order (RLN), clockwise,
+ * The connections are made in reverse-in-order (RNL), clockwise,
  * starting from the rightmost node of the new branch and finishing at root,
  * so when an in-order tree walk returns from a connected subtree,
  * it returns into the new branch and stays there.
@@ -196,7 +193,7 @@ void prealloc_connect(struct sptree_root *root, struct sptree_node *branch)
 		node->new_branch = 0;
 	}
 
-	/* finally link root / degenerate case (empty new branch) */
+	/* finally link root */
 	pbranch = get_pnode(root, branch->parent);
 	rcu_assign_pointer(*pbranch, branch);
 }
@@ -343,14 +340,14 @@ struct sptree_node *prealloc_child(struct sptree_ctxt *ctxt, struct sptree_node 
 // TODO: rename struct sptree_node *root -> target (naming convention)
 
 /* return new root to be set as top of branch */
-static struct sptree_node *prealloc_retrace_ror(struct sptree_node *root)
+static struct sptree_node *prealloc_retrace_ror(struct sptree_node *target)
 {
-	struct sptree_node *pivot = root->left;
+	struct sptree_node *pivot = target->left;
 	struct sptree_node *t2 = pivot->right;
 	struct sptree_node *new_root = pivot;
-	struct sptree_node *new_pivot = root;
+	struct sptree_node *new_pivot = target;
 
-	ASSERT(is_new_branch(root));
+	ASSERT(is_new_branch(target));
 	ASSERT(is_new_branch(pivot));
 
 	// redistribute t2
@@ -359,7 +356,7 @@ static struct sptree_node *prealloc_retrace_ror(struct sptree_node *root)
 		t2->parent = make_left(new_pivot);
 
 	// relink nodes
-	new_root->parent = root->parent;
+	new_root->parent = target->parent;
 	new_root->right = new_pivot;
 	new_pivot->parent = make_right(new_root);
 
@@ -377,18 +374,18 @@ static struct sptree_node *prealloc_retrace_ror(struct sptree_node *root)
 }
 
 /* return new root to be set as top of branch */
-static struct sptree_node *prealloc_retrace_rlr(struct sptree_node *root)
+static struct sptree_node *prealloc_retrace_rlr(struct sptree_node *target)
 {
-	// root = X
-	struct sptree_node *left = root->left;		// Z
+	// target = X
+	struct sptree_node *left = target->left;		// Z
 	struct sptree_node *right = left->right;	// Y
 	struct sptree_node *t2 = right->left;
 	struct sptree_node *t3 = right->right;
 	struct sptree_node *new_root = right;		// new Y
 	struct sptree_node *new_left = left;		// new Z
-	struct sptree_node *new_right = root;		// new X
+	struct sptree_node *new_right = target;		// new X
 
-	ASSERT(is_new_branch(root));
+	ASSERT(is_new_branch(target));
 	ASSERT(is_new_branch(left));
 	ASSERT(is_new_branch(right));
 
@@ -402,7 +399,7 @@ static struct sptree_node *prealloc_retrace_rlr(struct sptree_node *root)
 		t3->parent = make_left(new_right);
 
 	// relink nodes
-	new_root->parent = root->parent;
+	new_root->parent = target->parent;
 	new_root->left = new_left;
 	new_left->parent = make_left(new_root);
 	new_root->right = new_right;
@@ -428,14 +425,14 @@ static struct sptree_node *prealloc_retrace_rlr(struct sptree_node *root)
 }
 
 /* return new root to be set as top of branch */
-static struct sptree_node *prealloc_retrace_rol(struct sptree_node *root)
+static struct sptree_node *prealloc_retrace_rol(struct sptree_node *target)
 {
-	struct sptree_node *pivot = root->right;
+	struct sptree_node *pivot = target->right;
 	struct sptree_node *t2 = pivot->left;
 	struct sptree_node *new_root = pivot;
-	struct sptree_node *new_pivot = root;
+	struct sptree_node *new_pivot = target;
 
-	ASSERT(is_new_branch(root));
+	ASSERT(is_new_branch(target));
 	ASSERT(is_new_branch(pivot));
 
 	// redistribute t2
@@ -444,7 +441,7 @@ static struct sptree_node *prealloc_retrace_rol(struct sptree_node *root)
 		t2->parent = make_right(new_pivot);
 
 	// relink nodes
-	new_root->parent = root->parent;
+	new_root->parent = target->parent;
 	new_root->left = new_pivot;
 	new_pivot->parent = make_left(new_root);
 
@@ -462,18 +459,18 @@ static struct sptree_node *prealloc_retrace_rol(struct sptree_node *root)
 }
 
 /* return new root to be set as top of branch */
-static struct sptree_node *prealloc_retrace_rrl(struct sptree_node *root)
+static struct sptree_node *prealloc_retrace_rrl(struct sptree_node *target)
 {
-	// root = X
-	struct sptree_node *right = root->right;	// Z
+	// target = X
+	struct sptree_node *right = target->right;	// Z
 	struct sptree_node *left = right->left;		// Y
 	struct sptree_node *t2 = left->left;
 	struct sptree_node *t3 = left->right;
 	struct sptree_node *new_root = left;		// new Y
-	struct sptree_node *new_left = root;		// new X
+	struct sptree_node *new_left = target;		// new X
 	struct sptree_node *new_right = right;		// new Z
 
-	ASSERT(is_new_branch(root));
+	ASSERT(is_new_branch(target));
 	ASSERT(is_new_branch(right));
 	ASSERT(is_new_branch(left));
 
@@ -487,7 +484,7 @@ static struct sptree_node *prealloc_retrace_rrl(struct sptree_node *root)
 		t3->parent = make_left(new_right);
 
 	// relink nodes
-	new_root->parent = root->parent;
+	new_root->parent = target->parent;
 	new_root->left = new_left;
 	new_left->parent = make_left(new_root);
 	new_root->right = new_right;
