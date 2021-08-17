@@ -13,6 +13,7 @@
 #include <linux/debugfs.h>
 #include <linux/stat.h>
 #include <linux/uaccess.h>
+#include <linux/string.h>
 #include <linux/spinlock.h>
 #include <linux/fault-inject.h>
 
@@ -558,6 +559,166 @@ int dump_po_open(struct inode *inode, struct file *file)
 }
 
 
+static int find_args;
+static unsigned long find_num1, find_num2;
+
+static ssize_t find_write(struct file *file, const char __user *data, size_t count, loff_t *offs)
+{
+	int result;
+	char buf[32];
+	char *pos1 = NULL, *pos2 = NULL;
+	char *space, *eol;
+
+	pr_debug("%s: count = %d, offset = %d\n", __func__, (int)count, (int)*offs);
+
+	// first parse input
+	if (count > 32)
+		return -E2BIG;
+	memset(buf, 0, 32);
+	if (copy_from_user(buf, data, count))
+		return -EFAULT;
+	// replace \n -> \0
+	eol = strchr(buf, '\n');
+	if (eol)
+		*eol = '\0';
+
+	if (buf[0] == '\0')
+		find_args = 0;
+	else
+	{
+		// find the space separator
+		space = strchr(buf, ' ');
+		if (!space) {
+			find_args = 1;
+			pos1 = buf;
+		}
+		else {
+			find_args = 2;
+			*space = '\0';
+			pos1 = buf;
+			pos2 = space + 1;
+		}
+	}
+
+	if (pos1) {
+		result = kstrtoul(pos1, 16, &find_num1);
+		if (IS_ERR_VALUE((long)result))
+			return result;
+	}
+
+	if (pos2) {
+		result = kstrtoul(pos2, 16, &find_num2);
+		if (IS_ERR_VALUE((long)result))
+			return result;
+	}
+
+	if (find_args == 2 && find_num1 > find_num2)
+		return -EINVAL;
+
+	switch (find_args) {
+	case 0:
+		pr_debug("%s: will list all\n", __func__);
+		break;
+	case 1:
+		pr_debug("%s: look for value %lx\n", __func__, find_num1);
+		break;
+	case 2:
+		pr_debug("%s: look for interval %lx - %lx\n", __func__, find_num1, find_num2);
+		break;
+	}
+
+	*offs += count;
+	return count;
+}
+
+static int interval_filter(const struct sptree_node *crnt, const void *arg)
+{
+	const struct test_sptree_node *container = sptree_entry(crnt, struct test_sptree_node, node);
+	const unsigned long *interval = arg;
+
+	if (container->address < interval[0])
+		return -1;
+	else if (container->address >= interval[0] && container->address <= interval[1])
+		return 0;
+	else
+		return 1;
+}
+
+static ssize_t find_read(struct file *f, char __user *buf, size_t size, loff_t *offset)
+{
+	unsigned long page;
+	char *kbuf;
+	int count = 0;
+	struct test_sptree_node *container;
+	struct sptree_node *node;
+
+	pr_debug("%s: size = %d, offset = %d\n", __func__, (int)size, (int)*offset);
+
+	if (*offset)
+		return 0;
+
+	page = get_zeroed_page(GFP_KERNEL);
+	if (!page)
+		return -ENOMEM;
+	kbuf = (char *)page;
+
+	rcu_read_lock();
+
+	if (find_args == 0) {
+		sptree_for_each_entry(container, &sptree_range, node) {
+			count = sprintf(kbuf, "%lx ", container->address);
+			kbuf += count;
+		}
+	}
+	else if (find_args == 1) {
+		struct test_sptree_node match = {
+			.address = find_num1,
+		};
+
+		node = search(&sptree_range, &match.node);
+		container = sptree_entry_safe(node, struct test_sptree_node, node);
+		if (container) {
+			count = sprintf(kbuf, "%lx ", container->address);
+			kbuf += count;
+		}
+	}
+	else {
+		unsigned long interval[2] = {
+			[0] = find_num1,
+			[1] = find_num2,
+		};
+
+		sptree_for_each_entry_filter(container, &sptree_range, node, interval_filter, interval) {
+			count = sprintf(kbuf, "%lx ", container->address);
+			kbuf += count;
+		}
+	}
+
+	rcu_read_unlock();
+
+	/* nothing printed ? */
+	if (kbuf == (char *)page) {
+		free_page(page);
+		return 0;
+	}
+
+	*kbuf = '\n';
+	kbuf++;
+
+	count = kbuf - (char *)page;
+	kbuf = (char *)page;
+
+	if (copy_to_user(buf, kbuf, count)) {
+		free_page(page);
+		return -EFAULT;
+	}
+
+	free_page(page);
+
+	*offset += count;
+	return count;
+}
+
 static struct file_operations insert_map_ops = {
 	.owner = THIS_MODULE,
 	.write = insert_map,
@@ -614,6 +775,12 @@ static struct file_operations dump_po_map_ops = {
 	.release = seq_release,
 };
 
+static struct file_operations find_map_ops = {
+	.owner = THIS_MODULE,
+	.write = find_write,
+	.read = find_read,
+};
+
 static int __init sptree_debugfs_init(void)
 {
 	static struct dentry *result;
@@ -659,6 +826,10 @@ static int __init sptree_debugfs_init(void)
 		goto error;
 
 	result = debugfs_create_file("dump_po", S_IRUGO, debugfs_dir, NULL, &dump_po_map_ops);
+	if (IS_ERR(result))
+		goto error;
+
+	result = debugfs_create_file("find", S_IRUGO | S_IWUGO, debugfs_dir, NULL, &find_map_ops);
 	if (IS_ERR(result))
 		goto error;
 

@@ -34,9 +34,6 @@ struct sptree_root {
 	struct sptree_node __rcu *root;
 };
 
-// TODO: another filter function will be needed for walking
-// over intervals. This will have to be given to the iterator !?
-
 /**
  * sptree_entry - get the struct for this entry
  * @ptr:	the &struct sptree_node pointer.
@@ -73,6 +70,18 @@ extern struct sptree_node *sptree_next(struct sptree_node *node);
 	for (pos = sptree_entry_safe(sptree_first(root), typeof(*(pos)), member);	\
 	     pos != NULL;								\
 	     pos = sptree_entry_safe(sptree_next(&(pos)->member), typeof(*(pos)), member))
+
+
+/* filters will have the same semantics as memcmp() */
+typedef int (*filter)(const struct sptree_node *crnt, const void *arg);
+
+extern struct sptree_node *sptree_first_filter(struct sptree_root *root, filter f, const void *arg);
+extern struct sptree_node *sptree_next_filter(struct sptree_node *node, filter f, const void *arg);
+
+#define sptree_for_each_entry_filter(pos, root, member, filter, arg)					\
+	for (pos = sptree_entry_safe(sptree_first_filter(root, filter, arg), typeof(*(pos)), member);	\
+	     pos != NULL;										\
+	     pos = sptree_entry_safe(sptree_next_filter(&(pos)->member, filter, arg), typeof(*(pos)), member))
 
 
  /* post-order iterator */

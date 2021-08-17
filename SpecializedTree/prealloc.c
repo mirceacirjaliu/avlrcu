@@ -337,8 +337,6 @@ struct sptree_node *prealloc_child(struct sptree_ctxt *ctxt, struct sptree_node 
  * - retrace rotations always attempt to reduce the height of the subtree
  */
 
-// TODO: rename struct sptree_node *root -> target (naming convention)
-
 /* return new root to be set as top of branch */
 static struct sptree_node *prealloc_retrace_ror(struct sptree_node *target)
 {

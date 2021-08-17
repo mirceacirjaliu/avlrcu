@@ -178,6 +178,55 @@ struct sptree_node *sptree_next(struct sptree_node *node)
 	return sptree_successor(node);
 }
 
+struct sptree_node *sptree_first_filter(struct sptree_root *root, filter f, const void *arg)
+{
+	struct sptree_node *subroot = rcu_access_pointer(root->root);
+	struct sptree_node *left, *right, *first = NULL;
+	int result;
+
+	if (unlikely(!subroot))
+		return NULL;
+
+	/* look for the first node that verifies f(arg, node) >= 0 */
+	/* break if f(arg, subroot) >= 0 && left exists && f(arg, left) < 0 */
+	do {
+		left = rcu_access_pointer(subroot->left);
+		right = rcu_access_pointer(subroot->right);
+		result = f(subroot, arg);
+
+		if (result >= 0) {
+			if (result == 0)
+				first = subroot;
+			subroot = left;
+		}
+		else {
+			subroot = right;
+		}
+	} while (subroot);
+
+	/* must make sure that f(arg, first) == 0  */
+	return first;
+}
+
+struct sptree_node *sptree_next_filter(struct sptree_node *node, filter f, const void *arg)
+{
+	struct sptree_node *next;
+
+	ASSERT(node && f(node, arg) == 0);
+
+	next = rcu_access_pointer(node->right);
+	if (next) {
+		next = sptree_leftmost(next);
+		return (f(next, arg) == 0) ? next : NULL;
+	}
+
+	next = sptree_successor(node);
+	if (next)
+		return (f(next, arg) == 0) ? next : NULL;
+
+	return NULL;
+}
+
 
 /* post-order iteration */
 static struct sptree_node *sptree_left_deepest(struct sptree_node *node)
