@@ -64,7 +64,6 @@ static void test_free_rcu(struct sptree_node *node)
 	container = sptree_entry(node, struct test_sptree_node, node);
 
 	kfree_rcu(container, node.rcu);
-
 }
 
 static int test_cmp(const struct sptree_node *match, const struct sptree_node *crnt)

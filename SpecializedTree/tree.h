@@ -108,7 +108,7 @@ extern struct sptree_node *sptree_next_po(struct sptree_node *node);
 #define sptree_for_each_po_safe(pos, n, root)		\
 	for (pos = sptree_first_po(root);		\
 	     pos && ({ n = sptree_next_po(pos); 1; });	\
-	     pos = sptree_next_po(n))
+	     pos = n)
 
 extern void sptree_init(struct sptree_root *root, struct sptree_ops *ops);
 
