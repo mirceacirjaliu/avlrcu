@@ -1,12 +1,12 @@
 # If KERNELRELEASE is defined, we've been invoked from the
 # kernel build system and can use its language.
 ifneq ($(KERNELRELEASE),)
-	obj-m += specialized-tree.o
-	specialized-tree-objs += test.o tree.o prealloc.o
+	obj-m += avlrcu.o
+	avlrcu-objs += test.o tree.o prealloc.o
 
-	ccflags-y := -DSPTREE_DEBUG
-	# TODO: also need a build flag that enables the test interface: SPTREE_TEST
-	# TODO: SPTREE_TEST enables SPTREE_DEBUG
+	ccflags-y := -DAVLRCU_DEBUG
+	# TODO: also need a build flag that enables the test interface: AVLRCU_TEST
+	# TODO: AVLRCU_TEST enables AVLRCU_DEBUG
 
 	# += -O1 -fno-inline
 

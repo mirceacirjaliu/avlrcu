@@ -11,24 +11,24 @@
 
 #include "internal.h"
 
-void sptree_init(struct sptree_root *root, struct sptree_ops *ops)
+void avlrcu_init(struct avlrcu_root *root, struct avlrcu_ops *ops)
 {
 	root->ops = ops;
 	root->root = NULL;
 }
 
 /**
- * sptree_free() - deletes all the nodes in the tree
+ * avlrcu_free() - deletes all the nodes in the tree
  * @root	root of the tree
  *
  * This is a write-side call and must be protected by a lock.
  * All nodes are posted to RCU for deletion.
  */
-void sptree_free(struct sptree_root *root)
+void avlrcu_free(struct avlrcu_root *root)
 {
-	struct sptree_ops *ops = root->ops;
-	struct sptree_node *node, *temp;
-	struct sptree_root temp_root;
+	struct avlrcu_ops *ops = root->ops;
+	struct avlrcu_node *node, *temp;
+	struct avlrcu_root temp_root;
 
 	/* cut access to the tree */
 	temp_root.root = root->root;
@@ -39,14 +39,14 @@ void sptree_free(struct sptree_root *root)
 	 * use post-order walk to avoid nodes getting freed and links getting
 	 * broken if this iteration intersects the end of a grace period
 	 */
-	sptree_for_each_po_safe(node, temp, &temp_root)
+	avlrcu_for_each_po_safe(node, temp, &temp_root)
 		ops->free_rcu(node);
 }
 
-#ifdef SPTREE_DEBUG
+#ifdef AVLRCU_DEBUG
 
 // checks the AVL condition for subtree depths
-static int validate_subtree_balancing(struct sptree_node *node, bool *valid)
+static int validate_subtree_balancing(struct avlrcu_node *node, bool *valid)
 {
 	int left_depth = 0;
 	int right_depth = 0;
@@ -78,7 +78,7 @@ static int validate_subtree_balancing(struct sptree_node *node, bool *valid)
 	return max(left_depth, right_depth) + 1;
 }
 
-bool validate_avl_balancing(struct sptree_root *root)
+bool validate_avl_balancing(struct avlrcu_root *root)
 {
 	bool valid = true;
 
@@ -88,10 +88,10 @@ bool validate_avl_balancing(struct sptree_root *root)
 	return valid;
 }
 
-#endif /* SPTREE_DEBUG */
+#endif /* AVLRCU_DEBUG */
 
 /**
- * search() - search for an object in the tree
+ * avlrcu_search() - search for an object in the tree
  * @root	root of the tree
  * @match	node to match against
  *
@@ -99,10 +99,10 @@ bool validate_avl_balancing(struct sptree_root *root)
  * The cmp() callback has the same semantics as memcmp().
  * If a match is found, it is returned.
  */
-struct sptree_node *search(struct sptree_root *root, const struct sptree_node *match)
+struct avlrcu_node *avlrcu_search(struct avlrcu_root *root, const struct avlrcu_node *match)
 {
-	struct sptree_ops *ops = root->ops;
-	struct sptree_node *crnt;
+	struct avlrcu_ops *ops = root->ops;
+	struct avlrcu_node *crnt;
 	int result;
 
 	crnt = rcu_access_pointer(root->root);
@@ -122,9 +122,9 @@ struct sptree_node *search(struct sptree_root *root, const struct sptree_node *m
 
 
 /* in-order iteration */
-static struct sptree_node *sptree_leftmost(struct sptree_node *node)
+static struct avlrcu_node *avlrcu_leftmost(struct avlrcu_node *node)
 {
-	struct sptree_node *next;
+	struct avlrcu_node *next;
 
 	/* descend along the left branch */
 	for (;;) {
@@ -138,9 +138,9 @@ static struct sptree_node *sptree_leftmost(struct sptree_node *node)
 	}
 }
 
-static struct sptree_node *sptree_successor(struct sptree_node *node)
+static struct avlrcu_node *avlrcu_successor(struct avlrcu_node *node)
 {
-	struct sptree_node *next;
+	struct avlrcu_node *next;
 
 	/* ascend along the right branch */
 	for (;;) {
@@ -156,32 +156,32 @@ static struct sptree_node *sptree_successor(struct sptree_node *node)
 	}
 }
 
-struct sptree_node *sptree_first(struct sptree_root *root)
+struct avlrcu_node *avlrcu_first(struct avlrcu_root *root)
 {
-	struct sptree_node *next = rcu_access_pointer(root->root);
+	struct avlrcu_node *next = rcu_access_pointer(root->root);
 
 	if (unlikely(!next))
 		return NULL;
 
-	return sptree_leftmost(next);
+	return avlrcu_leftmost(next);
 }
 
-struct sptree_node *sptree_next(struct sptree_node *node)
+struct avlrcu_node *avlrcu_next(struct avlrcu_node *node)
 {
-	struct sptree_node *next;
+	struct avlrcu_node *next;
 
 	/* in-order LNR -> next is right */
 	next = rcu_access_pointer(node->right);
 	if (next)
-		return sptree_leftmost(next);
+		return avlrcu_leftmost(next);
 
-	return sptree_successor(node);
+	return avlrcu_successor(node);
 }
 
-struct sptree_node *sptree_first_filter(struct sptree_root *root, filter f, const void *arg)
+struct avlrcu_node *avlrcu_first_filter(struct avlrcu_root *root, filter f, const void *arg)
 {
-	struct sptree_node *subroot = rcu_access_pointer(root->root);
-	struct sptree_node *left, *right, *first = NULL;
+	struct avlrcu_node *subroot = rcu_access_pointer(root->root);
+	struct avlrcu_node *left, *right, *first = NULL;
 	int result;
 
 	if (unlikely(!subroot))
@@ -208,19 +208,19 @@ struct sptree_node *sptree_first_filter(struct sptree_root *root, filter f, cons
 	return first;
 }
 
-struct sptree_node *sptree_next_filter(struct sptree_node *node, filter f, const void *arg)
+struct avlrcu_node *avlrcu_next_filter(struct avlrcu_node *node, filter f, const void *arg)
 {
-	struct sptree_node *next;
+	struct avlrcu_node *next;
 
 	ASSERT(node && f(node, arg) == 0);
 
 	next = rcu_access_pointer(node->right);
 	if (next) {
-		next = sptree_leftmost(next);
+		next = avlrcu_leftmost(next);
 		return (f(next, arg) == 0) ? next : NULL;
 	}
 
-	next = sptree_successor(node);
+	next = avlrcu_successor(node);
 	if (next)
 		return (f(next, arg) == 0) ? next : NULL;
 
@@ -229,9 +229,9 @@ struct sptree_node *sptree_next_filter(struct sptree_node *node, filter f, const
 
 
 /* post-order iteration */
-static struct sptree_node *sptree_left_deepest(struct sptree_node *node)
+static struct avlrcu_node *avlrcu_left_deepest(struct avlrcu_node *node)
 {
-	struct sptree_node *next;
+	struct avlrcu_node *next;
 
 	for (;;) {
 		next = rcu_access_pointer(node->left);
@@ -250,19 +250,19 @@ static struct sptree_node *sptree_left_deepest(struct sptree_node *node)
 	}
 }
 
-extern struct sptree_node *sptree_first_po(struct sptree_root *root)
+extern struct avlrcu_node *avlrcu_first_po(struct avlrcu_root *root)
 {
-	struct sptree_node *next = rcu_access_pointer(root->root);
+	struct avlrcu_node *next = rcu_access_pointer(root->root);
 
 	if (unlikely(!next))
 		return NULL;
 
-	return sptree_left_deepest(next);
+	return avlrcu_left_deepest(next);
 }
 
-extern struct sptree_node *sptree_next_po(struct sptree_node *node)
+extern struct avlrcu_node *avlrcu_next_po(struct avlrcu_node *node)
 {
-	struct sptree_node *parent, *next;
+	struct avlrcu_node *parent, *next;
 
 	if (!node)
 		return NULL;
@@ -272,7 +272,7 @@ extern struct sptree_node *sptree_next_po(struct sptree_node *node)
 		parent = strip_flags(parent);
 		next = rcu_access_pointer(parent->right);
 		if (next)
-			return sptree_left_deepest(next);
+			return avlrcu_left_deepest(next);
 		else
 			return parent;
 	}
@@ -280,9 +280,9 @@ extern struct sptree_node *sptree_next_po(struct sptree_node *node)
 		return strip_flags(parent);
 }
 
-static struct sptree_node *fix_diff_height(struct sptree_ctxt *ctxt, struct sptree_node *prealloc)
+static struct avlrcu_node *fix_diff_height(struct avlrcu_ctxt *ctxt, struct avlrcu_node *prealloc)
 {
-	struct sptree_node *initial = prealloc;
+	struct avlrcu_node *initial = prealloc;
 	int i, num, diff;
 
 	pr_debug("%s: overall increase in height: %d\n", __func__, ctxt->diff);
@@ -316,9 +316,9 @@ error:
 	return NULL;
 }
 
-static struct sptree_node *rotate_right_generic(struct sptree_ctxt *ctxt, struct sptree_node *target)
+static struct avlrcu_node *rotate_right_generic(struct avlrcu_ctxt *ctxt, struct avlrcu_node *target)
 {
-	struct sptree_node *pivot;
+	struct avlrcu_node *pivot;
 
 	target = prealloc_replace(ctxt, target);
 	if (!target)
@@ -335,14 +335,14 @@ error:
 	return NULL;
 }
 
-int test_ror(struct sptree_root *root, const struct sptree_node *match)
+int avlrcu_test_ror(struct avlrcu_root *root, const struct avlrcu_node *match)
 {
-	struct sptree_node *target;
-	struct sptree_node *pivot;
-	struct sptree_node *prealloc;
-	struct sptree_ctxt ctxt;
+	struct avlrcu_node *target;
+	struct avlrcu_node *pivot;
+	struct avlrcu_node *prealloc;
+	struct avlrcu_ctxt ctxt;
 
-	target = search(root, match);
+	target = avlrcu_search(root, match);
 	if (!target)
 		return -ENXIO;
 
@@ -352,7 +352,7 @@ int test_ror(struct sptree_root *root, const struct sptree_node *match)
 		return -EINVAL;
 	}
 
-	sptree_ctxt_init(&ctxt, root);
+	avlrcu_ctxt_init(&ctxt, root);
 
 	prealloc = rotate_right_generic(&ctxt, target);
 	if (!prealloc)
@@ -371,9 +371,9 @@ int test_ror(struct sptree_root *root, const struct sptree_node *match)
 	return 0;
 }
 
-static struct sptree_node *rotate_left_generic(struct sptree_ctxt *ctxt, struct sptree_node *target)
+static struct avlrcu_node *rotate_left_generic(struct avlrcu_ctxt *ctxt, struct avlrcu_node *target)
 {
-	struct sptree_node *pivot;
+	struct avlrcu_node *pivot;
 
 	target = prealloc_replace(ctxt, target);
 	if (!target)
@@ -390,14 +390,14 @@ error:
 	return NULL;
 }
 
-int test_rol(struct sptree_root *root, const struct sptree_node *match)
+int avlrcu_test_rol(struct avlrcu_root *root, const struct avlrcu_node *match)
 {
-	struct sptree_node *target;
-	struct sptree_node *pivot;
-	struct sptree_node *prealloc;
-	struct sptree_ctxt ctxt;
+	struct avlrcu_node *target;
+	struct avlrcu_node *pivot;
+	struct avlrcu_node *prealloc;
+	struct avlrcu_ctxt ctxt;
 
-	target = search(root, match);
+	target = avlrcu_search(root, match);
 	if (!target)
 		return -ENXIO;
 
@@ -407,7 +407,7 @@ int test_rol(struct sptree_root *root, const struct sptree_node *match)
 		return -EINVAL;
 	}
 
-	sptree_ctxt_init(&ctxt, root);
+	avlrcu_ctxt_init(&ctxt, root);
 
 	prealloc = rotate_left_generic(&ctxt, target);
 	if (!prealloc)
@@ -426,9 +426,9 @@ int test_rol(struct sptree_root *root, const struct sptree_node *match)
 	return 0;
 }
 
-static struct sptree_node *rotate_right_left_generic(struct sptree_ctxt *ctxt, struct sptree_node *target)
+static struct avlrcu_node *rotate_right_left_generic(struct avlrcu_ctxt *ctxt, struct avlrcu_node *target)
 {
-	struct sptree_node *left, *right;
+	struct avlrcu_node *left, *right;
 
 	target = prealloc_replace(ctxt, target);
 	if (!target)
@@ -449,13 +449,13 @@ error:
 	return NULL;
 }
 
-int test_rrl(struct sptree_root *root, const struct sptree_node *match)
+int avlrcu_test_rrl(struct avlrcu_root *root, const struct avlrcu_node *match)
 {
-	struct sptree_node *target;
-	struct sptree_node *prealloc;
-	struct sptree_ctxt ctxt;
+	struct avlrcu_node *target;
+	struct avlrcu_node *prealloc;
+	struct avlrcu_ctxt ctxt;
 
-	target = search(root, match);
+	target = avlrcu_search(root, match);
 	if (!target)
 		return -ENXIO;
 
@@ -469,7 +469,7 @@ int test_rrl(struct sptree_root *root, const struct sptree_node *match)
 		return -EINVAL;
 	}
 
-	sptree_ctxt_init(&ctxt, root);
+	avlrcu_ctxt_init(&ctxt, root);
 
 	prealloc = rotate_right_left_generic(&ctxt, target);
 	if (!prealloc)
@@ -488,9 +488,9 @@ int test_rrl(struct sptree_root *root, const struct sptree_node *match)
 	return 0;
 }
 
-static struct sptree_node *rotate_left_right_generic(struct sptree_ctxt *ctxt, struct sptree_node *target)
+static struct avlrcu_node *rotate_left_right_generic(struct avlrcu_ctxt *ctxt, struct avlrcu_node *target)
 {
-	struct sptree_node *left, *right;
+	struct avlrcu_node *left, *right;
 
 	target = prealloc_replace(ctxt, target);
 	if (!target)
@@ -511,13 +511,13 @@ error:
 	return NULL;
 }
 
-int test_rlr(struct sptree_root *root, const struct sptree_node *match)
+int avlrcu_test_rlr(struct avlrcu_root *root, const struct avlrcu_node *match)
 {
-	struct sptree_node *target;
-	struct sptree_node *prealloc;
-	struct sptree_ctxt ctxt;
+	struct avlrcu_node *target;
+	struct avlrcu_node *prealloc;
+	struct avlrcu_ctxt ctxt;
 
-	target = search(root, match);
+	target = avlrcu_search(root, match);
 	if (!target)
 		return -ENXIO;
 
@@ -531,7 +531,7 @@ int test_rlr(struct sptree_root *root, const struct sptree_node *match)
 		return -EINVAL;
 	}
 
-	sptree_ctxt_init(&ctxt, root);
+	avlrcu_ctxt_init(&ctxt, root);
 
 	prealloc = rotate_left_right_generic(&ctxt, target);
 	if (!prealloc)
@@ -550,13 +550,13 @@ int test_rlr(struct sptree_root *root, const struct sptree_node *match)
 	return 0;
 }
 
-int test_unwind(struct sptree_root *root, const struct sptree_node *match)
+int avlrcu_test_unwind(struct avlrcu_root *root, const struct avlrcu_node *match)
 {
-	struct sptree_node *target;
-	struct sptree_node *prealloc;
-	struct sptree_ctxt ctxt;
+	struct avlrcu_node *target;
+	struct avlrcu_node *prealloc;
+	struct avlrcu_ctxt ctxt;
 
-	target = search(root, match);
+	target = avlrcu_search(root, match);
 	if (!target)
 		return -ENXIO;
 
@@ -570,7 +570,7 @@ int test_unwind(struct sptree_root *root, const struct sptree_node *match)
 		return -EINVAL;
 	}
 
-	sptree_ctxt_init(&ctxt, root);
+	avlrcu_ctxt_init(&ctxt, root);
 
 	// the unwind function returns the bottom of the preallocated branch
 	prealloc = prealloc_unwind(&ctxt, target);

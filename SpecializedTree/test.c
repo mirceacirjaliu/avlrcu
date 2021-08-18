@@ -20,7 +20,7 @@
 #include "test.h"
 
 // the object we test
-static struct sptree_root sptree_range;
+static struct avlrcu_root avlrcu_range;
 static DEFINE_SPINLOCK(lock);
 
 // thread control
@@ -30,66 +30,66 @@ static struct task_struct *validator;
 static struct dentry *debugfs_dir;
 
 #ifdef CONFIG_FAULT_INJECTION
-DECLARE_FAULT_ATTR(sptree_fault_attr);
+DECLARE_FAULT_ATTR(avlrcu_fault_attr);
 #endif /* CONFIG_FAULT_INJECTION */
 
-static struct sptree_node *test_alloc(void)
+static struct avlrcu_node *test_alloc(void)
 {
-	struct test_sptree_node *container;
+	struct test_avlrcu_node *container;
 
 #ifdef CONFIG_FAULT_INJECTION
 	/* trigger allocation failure */
-	if (should_fail(&sptree_fault_attr, sizeof(struct test_sptree_node)))
+	if (should_fail(&avlrcu_fault_attr, sizeof(struct test_avlrcu_node)))
 		return NULL;
 #endif /* CONFIG_FAULT_INJECTION */
 
-	container = kzalloc(sizeof(struct test_sptree_node), GFP_ATOMIC);
+	container = kzalloc(sizeof(struct test_avlrcu_node), GFP_ATOMIC);
 	if (!container)
 		return NULL;
 
 	return &container->node;
 }
 
-static void test_free(struct sptree_node *node)
+static void test_free(struct avlrcu_node *node)
 {
-	struct test_sptree_node *container;
-	container = sptree_entry(node, struct test_sptree_node, node);
+	struct test_avlrcu_node *container;
+	container = avlrcu_entry(node, struct test_avlrcu_node, node);
 
 	kfree(container);
 }
 
-static void test_free_rcu(struct sptree_node *node)
+static void test_free_rcu(struct avlrcu_node *node)
 {
-	struct test_sptree_node *container;
-	container = sptree_entry(node, struct test_sptree_node, node);
+	struct test_avlrcu_node *container;
+	container = avlrcu_entry(node, struct test_avlrcu_node, node);
 
 	kfree_rcu(container, node.rcu);
 }
 
-static int test_cmp(const struct sptree_node *match, const struct sptree_node *crnt)
+static int test_cmp(const struct avlrcu_node *match, const struct avlrcu_node *crnt)
 {
-	struct test_sptree_node *container_match;
-	struct test_sptree_node *container_crnt;
+	struct test_avlrcu_node *container_match;
+	struct test_avlrcu_node *container_crnt;
 
-	container_match = sptree_entry(match, struct test_sptree_node, node);
-	container_crnt = sptree_entry(crnt, struct test_sptree_node, node);
+	container_match = avlrcu_entry(match, struct test_avlrcu_node, node);
+	container_crnt = avlrcu_entry(crnt, struct test_avlrcu_node, node);
 
 	// watch out for truncation !!
 	return (int)((long)container_match->address - (long)container_crnt->address);
 }
 
-static void test_copy(struct sptree_node *to, struct sptree_node *from)
+static void test_copy(struct avlrcu_node *to, struct avlrcu_node *from)
 {
-	struct test_sptree_node *container_to;
-	struct test_sptree_node *container_from;
+	struct test_avlrcu_node *container_to;
+	struct test_avlrcu_node *container_from;
 
-	container_to = sptree_entry(to, struct test_sptree_node, node);
-	container_from = sptree_entry(from, struct test_sptree_node, node);
+	container_to = avlrcu_entry(to, struct test_avlrcu_node, node);
+	container_from = avlrcu_entry(from, struct test_avlrcu_node, node);
 
-	memcpy(container_to, container_from, sizeof(struct test_sptree_node));
+	memcpy(container_to, container_from, sizeof(struct test_avlrcu_node));
 }
 
-static struct sptree_ops test_ops = {
+static struct avlrcu_ops test_ops = {
 	.alloc = test_alloc,
 	.free = test_free,
 	.free_rcu = test_free_rcu,
@@ -98,9 +98,9 @@ static struct sptree_ops test_ops = {
 };
 
 static int prev_count = 0;
-static void validate_greater(struct sptree_root *root)
+static void validate_greater(struct avlrcu_root *root)
 {
-	struct test_sptree_node *container;
+	struct test_avlrcu_node *container;
 	unsigned long prev;
 	int count;
 	int result = 0;
@@ -110,7 +110,7 @@ static void validate_greater(struct sptree_root *root)
 
 	prev = 0;
 	count = 0;
-	sptree_for_each_entry(container, root, node) {
+	avlrcu_for_each_entry(container, root, node) {
 		if (prev >= container->address) {
 			result = -EINVAL;
 			break;
@@ -140,7 +140,7 @@ static int validator_func(void *arg)
 
 	do {
 		// validate each element is greater than the last
-		validate_greater(&sptree_range);
+		validate_greater(&avlrcu_range);
 
 		msleep_interruptible(10);
 
@@ -154,7 +154,7 @@ static int validator_func(void *arg)
 static ssize_t insert_map(struct file *file, const char __user *data, size_t count, loff_t *offs)
 {
 	unsigned long value;
-	struct test_sptree_node *container;
+	struct test_avlrcu_node *container;
 	int result;
 
 	result = kstrtoul_from_user(data, count, 16, &value);
@@ -163,7 +163,7 @@ static ssize_t insert_map(struct file *file, const char __user *data, size_t cou
 
 	pr_debug("%s: at %lx\n", __func__, value);
 
-	container = kzalloc(sizeof(struct test_sptree_node), GFP_ATOMIC);
+	container = kzalloc(sizeof(struct test_avlrcu_node), GFP_ATOMIC);
 	if (!container)
 		return -ENOMEM;
 	container->address = value;
@@ -171,7 +171,7 @@ static ssize_t insert_map(struct file *file, const char __user *data, size_t cou
 	/* these have to match with the allocation functions */
 	spin_lock(&lock);
 
-	result = prealloc_insert(&sptree_range, &container->node);
+	result = avlrcu_insert(&avlrcu_range, &container->node);
 
 	spin_unlock(&lock);
 
@@ -187,9 +187,9 @@ static ssize_t insert_map(struct file *file, const char __user *data, size_t cou
 
 static ssize_t delete_map(struct file *file, const char __user *data, size_t count, loff_t *offs)
 {
-	struct test_sptree_node match;
-	struct sptree_node *node;
-	struct test_sptree_node *container;
+	struct test_avlrcu_node match;
+	struct avlrcu_node *node;
+	struct test_avlrcu_node *container;
 	int result;
 
 	result = kstrtoul_from_user(data, count, 16, &match.address);
@@ -201,12 +201,12 @@ static ssize_t delete_map(struct file *file, const char __user *data, size_t cou
 	/* these have to match with the allocation functions */
 	spin_lock(&lock);
 
-	node = prealloc_delete(&sptree_range, &match.node);
+	node = avlrcu_delete(&avlrcu_range, &match.node);
 
 	spin_unlock(&lock);
 
 	if (!IS_ERR(node)) {
-		container = sptree_entry(node, struct test_sptree_node, node);
+		container = avlrcu_entry(node, struct test_avlrcu_node, node);
 		kfree_rcu(container, node.rcu);
 		// or
 		//synchronize_rcu();
@@ -228,7 +228,7 @@ static ssize_t delete_map(struct file *file, const char __user *data, size_t cou
 
 static ssize_t unwind_map(struct file *file, const char __user *data, size_t count, loff_t *offs)
 {
-	struct test_sptree_node match;
+	struct test_avlrcu_node match;
 	int result;
 
 	result = kstrtoul_from_user(data, count, 16, &match.address);
@@ -240,7 +240,7 @@ static ssize_t unwind_map(struct file *file, const char __user *data, size_t cou
 	/* these have to match with the allocation functions */
 	spin_lock(&lock);
 
-	result = test_unwind(&sptree_range, &match.node);
+	result = avlrcu_test_unwind(&avlrcu_range, &match.node);
 
 	spin_unlock(&lock);
 
@@ -259,7 +259,7 @@ static ssize_t clear_map(struct file *file, const char __user *data, size_t coun
 	/* these have to match with the allocation functions */
 	spin_lock(&lock);
 
-	sptree_free(&sptree_range);
+	avlrcu_free(&avlrcu_range);
 	prev_count = 0;	/* reset validator counter */
 
 	spin_unlock(&lock);
@@ -270,7 +270,7 @@ static ssize_t clear_map(struct file *file, const char __user *data, size_t coun
 
 static ssize_t ror_map(struct file *file, const char __user *data, size_t count, loff_t *offs)
 {
-	struct test_sptree_node match;
+	struct test_avlrcu_node match;
 	int result;
 
 	result = kstrtoul_from_user(data, count, 16, &match.address);
@@ -282,7 +282,7 @@ static ssize_t ror_map(struct file *file, const char __user *data, size_t count,
 	/* these have to match with the allocation functions */
 	spin_lock(&lock);
 
-	result = test_ror(&sptree_range, &match.node);
+	result = avlrcu_test_ror(&avlrcu_range, &match.node);
 
 	spin_unlock(&lock);
 
@@ -298,7 +298,7 @@ static ssize_t ror_map(struct file *file, const char __user *data, size_t count,
 
 static ssize_t rol_map(struct file *file, const char __user *data, size_t count, loff_t *offs)
 {
-	struct test_sptree_node match;
+	struct test_avlrcu_node match;
 	int result;
 
 	result = kstrtoul_from_user(data, count, 16, &match.address);
@@ -310,7 +310,7 @@ static ssize_t rol_map(struct file *file, const char __user *data, size_t count,
 	/* these have to match with the allocation functions */
 	spin_lock(&lock);
 
-	result = test_rol(&sptree_range, &match.node);
+	result = avlrcu_test_rol(&avlrcu_range, &match.node);
 
 	spin_unlock(&lock);
 
@@ -326,7 +326,7 @@ static ssize_t rol_map(struct file *file, const char __user *data, size_t count,
 
 static ssize_t rrl_map(struct file *file, const char __user *data, size_t count, loff_t *offs)
 {
-	struct test_sptree_node match;
+	struct test_avlrcu_node match;
 	int result;
 
 	result = kstrtoul_from_user(data, count, 16, &match.address);
@@ -338,7 +338,7 @@ static ssize_t rrl_map(struct file *file, const char __user *data, size_t count,
 	/* these have to match with the allocation functions */
 	spin_lock(&lock);
 
-	result = test_rrl(&sptree_range, &match.node);
+	result = avlrcu_test_rrl(&avlrcu_range, &match.node);
 
 	spin_unlock(&lock);
 
@@ -354,7 +354,7 @@ static ssize_t rrl_map(struct file *file, const char __user *data, size_t count,
 
 static ssize_t rlr_map(struct file *file, const char __user *data, size_t count, loff_t *offs)
 {
-	struct test_sptree_node match;
+	struct test_avlrcu_node match;
 	int result;
 
 	result = kstrtoul_from_user(data, count, 16, &match.address);
@@ -366,7 +366,7 @@ static ssize_t rlr_map(struct file *file, const char __user *data, size_t count,
 	/* these have to match with the allocation functions */
 	spin_lock(&lock);
 
-	result = test_rlr(&sptree_range, &match.node);
+	result = avlrcu_test_rlr(&avlrcu_range, &match.node);
 
 	spin_unlock(&lock);
 
@@ -383,11 +383,11 @@ static ssize_t rlr_map(struct file *file, const char __user *data, size_t count,
 
 /* even if tree is empty, return a valid value for header, root, footer
  * NULL means past end of file condition */
-#define DUMMY_NODE_END_OF_TREE	((struct sptree_node *) 1)
+#define DUMMY_NODE_END_OF_TREE	((struct avlrcu_node *) 1)
 
 static void *dump_gv_start(struct seq_file *s, loff_t *pos)
 {
-	struct sptree_node *node = s->private;
+	struct avlrcu_node *node = s->private;
 
 	/* new session */
 	if (node)
@@ -397,7 +397,7 @@ static void *dump_gv_start(struct seq_file *s, loff_t *pos)
 	if (*pos)
 		return NULL;
 
-	node = sptree_first(&sptree_range);
+	node = avlrcu_first(&avlrcu_range);
 	if (!node)
 		node = DUMMY_NODE_END_OF_TREE;
 	s->private = node;
@@ -411,9 +411,9 @@ static void *dump_gv_start(struct seq_file *s, loff_t *pos)
 
 static int dump_gv_show(struct seq_file *s, void *v)
 {
-	struct sptree_node *node = s->private;
-	struct sptree_node *parent, *left, *right;
-	struct test_sptree_node *container;
+	struct avlrcu_node *node = s->private;
+	struct avlrcu_node *parent, *left, *right;
+	struct test_avlrcu_node *container;
 
 	if (unlikely(node == DUMMY_NODE_END_OF_TREE))
 		return 0;
@@ -421,7 +421,7 @@ static int dump_gv_show(struct seq_file *s, void *v)
 	parent = node->parent;
 	left = node->left;
 	right = node->right;
-	container = sptree_entry(node, struct test_sptree_node, node);
+	container = avlrcu_entry(node, struct test_avlrcu_node, node);
 
 	seq_printf(s, "\tn%lx [label=\"%lx\\n%ld\", style=filled, fillcolor=%s]\n",
 		(unsigned long)node, container->address, (long)node->balance, "green");
@@ -454,13 +454,13 @@ static int dump_gv_show(struct seq_file *s, void *v)
 
 static void *dump_gv_next(struct seq_file *s, void *v, loff_t *pos)
 {
-	struct sptree_node *node = s->private;
+	struct avlrcu_node *node = s->private;
 
 	(*pos)++;
 	if (node == DUMMY_NODE_END_OF_TREE)
 		return NULL;
 
-	node = sptree_next(node);
+	node = avlrcu_next(node);
 	if (!node) {
 		s->private = DUMMY_NODE_END_OF_TREE;
 		return NULL;
@@ -472,7 +472,7 @@ static void *dump_gv_next(struct seq_file *s, void *v, loff_t *pos)
 
 static void dump_gv_stop(struct seq_file *s, void *v)
 {
-	struct sptree_node *node = s->private;
+	struct avlrcu_node *node = s->private;
 
 	/* print footer, do not react on NULL */
 	if (node == DUMMY_NODE_END_OF_TREE) {
@@ -499,7 +499,7 @@ int dump_gv_open(struct inode *inode, struct file *file)
 
 static void *dump_po_start(struct seq_file *s, loff_t *pos)
 {
-	struct sptree_node *node = s->private;
+	struct avlrcu_node *node = s->private;
 
 	/* new session */
 	if (node)
@@ -509,7 +509,7 @@ static void *dump_po_start(struct seq_file *s, loff_t *pos)
 	if (*pos)
 		return NULL;
 
-	node = sptree_first_po(&sptree_range);
+	node = avlrcu_first_po(&avlrcu_range);
 	s->private = node;
 
 	return node;
@@ -517,8 +517,8 @@ static void *dump_po_start(struct seq_file *s, loff_t *pos)
 
 static int dump_po_show(struct seq_file *s, void *v)
 {
-	struct sptree_node *node = s->private;
-	struct test_sptree_node *container = sptree_entry(node, struct test_sptree_node, node);
+	struct avlrcu_node *node = s->private;
+	struct test_avlrcu_node *container = avlrcu_entry(node, struct test_avlrcu_node, node);
 
 	seq_printf(s, "%lx\n", container->address);
 
@@ -527,10 +527,10 @@ static int dump_po_show(struct seq_file *s, void *v)
 
 static void *dump_po_next(struct seq_file *s, void *v, loff_t *pos)
 {
-	struct sptree_node *node = s->private;
+	struct avlrcu_node *node = s->private;
 
 	(*pos)++;
-	node = sptree_next_po(node);
+	node = avlrcu_next_po(node);
 	s->private = node;
 
 	return node;
@@ -538,7 +538,7 @@ static void *dump_po_next(struct seq_file *s, void *v, loff_t *pos)
 
 static void dump_po_stop(struct seq_file *s, void *v)
 {
-	//struct sptree_node *node = s->private;
+	//struct avlrcu_node *node = s->private;
 
 }
 
@@ -630,9 +630,9 @@ static ssize_t find_write(struct file *file, const char __user *data, size_t cou
 	return count;
 }
 
-static int interval_filter(const struct sptree_node *crnt, const void *arg)
+static int interval_filter(const struct avlrcu_node *crnt, const void *arg)
 {
-	const struct test_sptree_node *container = sptree_entry(crnt, struct test_sptree_node, node);
+	const struct test_avlrcu_node *container = avlrcu_entry(crnt, struct test_avlrcu_node, node);
 	const unsigned long *interval = arg;
 
 	if (container->address < interval[0])
@@ -648,8 +648,8 @@ static ssize_t find_read(struct file *f, char __user *buf, size_t size, loff_t *
 	unsigned long page;
 	char *kbuf;
 	int count = 0;
-	struct test_sptree_node *container;
-	struct sptree_node *node;
+	struct test_avlrcu_node *container;
+	struct avlrcu_node *node;
 
 	pr_debug("%s: size = %d, offset = %d\n", __func__, (int)size, (int)*offset);
 
@@ -664,18 +664,18 @@ static ssize_t find_read(struct file *f, char __user *buf, size_t size, loff_t *
 	rcu_read_lock();
 
 	if (find_args == 0) {
-		sptree_for_each_entry(container, &sptree_range, node) {
+		avlrcu_for_each_entry(container, &avlrcu_range, node) {
 			count = sprintf(kbuf, "%lx ", container->address);
 			kbuf += count;
 		}
 	}
 	else if (find_args == 1) {
-		struct test_sptree_node match = {
+		struct test_avlrcu_node match = {
 			.address = find_num1,
 		};
 
-		node = search(&sptree_range, &match.node);
-		container = sptree_entry_safe(node, struct test_sptree_node, node);
+		node = avlrcu_search(&avlrcu_range, &match.node);
+		container = avlrcu_entry_safe(node, struct test_avlrcu_node, node);
 		if (container) {
 			count = sprintf(kbuf, "%lx ", container->address);
 			kbuf += count;
@@ -687,7 +687,7 @@ static ssize_t find_read(struct file *f, char __user *buf, size_t size, loff_t *
 			[1] = find_num2,
 		};
 
-		sptree_for_each_entry_filter(container, &sptree_range, node, interval_filter, interval) {
+		avlrcu_for_each_entry_filter(container, &avlrcu_range, node, interval_filter, interval) {
 			count = sprintf(kbuf, "%lx ", container->address);
 			kbuf += count;
 		}
@@ -780,11 +780,11 @@ static struct file_operations find_map_ops = {
 	.read = find_read,
 };
 
-static int __init sptree_debugfs_init(void)
+static int __init avlrcu_debugfs_init(void)
 {
 	static struct dentry *result;
 
-	debugfs_dir = debugfs_create_dir("sptree", NULL);
+	debugfs_dir = debugfs_create_dir("avlrcu", NULL);
 	if (IS_ERR(debugfs_dir))
 		return PTR_ERR(debugfs_dir);
 
@@ -833,7 +833,7 @@ static int __init sptree_debugfs_init(void)
 		goto error;
 
 #ifdef CONFIG_FAULT_INJECTION
-	result = fault_create_debugfs_attr("fail_sptree", debugfs_dir, &sptree_fault_attr);
+	result = fault_create_debugfs_attr("fail_avlrcu", debugfs_dir, &avlrcu_fault_attr);
 	if (IS_ERR(result))
 		goto error;
 #endif /* CONFIG_FAULT_INJECTION */
@@ -846,19 +846,19 @@ error:
 	return PTR_ERR(result);
 }
 
-static int __init sptree_test_init(void)
+static int __init avlrcu_test_init(void)
 {
 	int result;
 
-	sptree_init(&sptree_range, &test_ops);
+	avlrcu_init(&avlrcu_range, &test_ops);
 
 	// create access files
-	result = sptree_debugfs_init();
+	result = avlrcu_debugfs_init();
 	if (result)
 		goto out_tree;
 
 	// create a thread that validates the tree in the background
-	validator = kthread_run(validator_func, NULL, "sptree-validator");
+	validator = kthread_run(validator_func, NULL, "avlrcu-validator");
 	if (IS_ERR(validator)) {
 		result = PTR_ERR(validator);
 		goto out_debugfs;
@@ -869,24 +869,24 @@ static int __init sptree_test_init(void)
 out_debugfs:
 	debugfs_remove_recursive(debugfs_dir);
 out_tree:
-	sptree_free(&sptree_range);
+	avlrcu_free(&avlrcu_range);
 
 	return result;
 }
 
-static void __exit sptree_test_exit(void)
+static void __exit avlrcu_test_exit(void)
 {
 	debugfs_remove_recursive(debugfs_dir);
 
 	kthread_stop(validator);
 
-	sptree_free(&sptree_range);
+	avlrcu_free(&avlrcu_range);
 
 	pr_debug("bye bye\n");
 }
 
-module_init(sptree_test_init);
-module_exit(sptree_test_exit);
+module_init(avlrcu_test_init);
+module_exit(avlrcu_test_exit);
 
 MODULE_AUTHOR("Mircea Cirjaliu");
 MODULE_LICENSE("GPL");

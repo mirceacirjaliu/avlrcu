@@ -1,16 +1,16 @@
 
-#ifndef _SPTREE_TEST_H_
-#define _SPTREE_TEST_H_
+#ifndef _AVLRCU_TEST_H_
+#define _AVLRCU_TEST_H_
 
 #include "tree.h"
 #include "internal.h"
 
-struct test_sptree_node {
+struct test_avlrcu_node {
 	/* task-specific fields */
 	unsigned long address;
 
 	/* link */
-	struct sptree_node node;
+	struct avlrcu_node node;
 };
 
-#endif /* _SPTREE_TEST_H_ */
+#endif /* _AVLRCU_TEST_H_ */

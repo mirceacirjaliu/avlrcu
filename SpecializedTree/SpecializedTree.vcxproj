@@ -84,12 +84,12 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <RemoteBuildCommandLine>make</RemoteBuildCommandLine>
-    <RemoteBuildOutputs>specialized-tree.ko</RemoteBuildOutputs>
+    <RemoteBuildOutputs>avlrcu.ko</RemoteBuildOutputs>
     <RemoteCleanCommandLine>make clean</RemoteCleanCommandLine>
     <RemoteReBuildCommandLine>make</RemoteReBuildCommandLine>
     <NMakeIncludeSearchPath>D:\kernel\kernel\kernel\arch\x86\include;D:\kernel\kernel\build\arch\x86\include\generated;D:\kernel\kernel\kernel\include;D:\kernel\kernel\build\include;D:\kernel\kernel\kernel\arch\x86\include\uapi;D:\kernel\kernel\build\arch\x86\include\generated\uapi;D:\kernel\kernel\kernel\include\uapi;D:\kernel\kernel\build\include\generated\uapi;D:\kernel\kernel\kernel\tools\lib;D:\kernel\kernel\build\bpf;D:\kernel\kernel\kernel\tools\testing\selftests\bpf</NMakeIncludeSearchPath>
     <NMakeForcedIncludes>D:\kernel\kernel\build\override.h;D:\kernel\kernel\kernel\include\linux\kconfig.h;D:\kernel\kernel\kernel\include\linux\compiler_types.h</NMakeForcedIncludes>
-    <NMakePreprocessorDefinitions>__KERNEL__;KBUILD_MODNAME="";SPTREE_DEBUG</NMakePreprocessorDefinitions>
+    <NMakePreprocessorDefinitions>__KERNEL__;KBUILD_MODNAME="";AVLRCU_DEBUG</NMakePreprocessorDefinitions>
   </PropertyGroup>
   <ItemGroup>
     <Text Include="Makefile" />
