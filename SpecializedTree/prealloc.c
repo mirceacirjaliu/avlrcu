@@ -608,7 +608,7 @@ int avlrcu_insert(struct avlrcu_root *root, struct avlrcu_node *node)
 		result = ops->cmp(node, crnt);
 
 		if (unlikely(result == 0))
-			return -EALREADY;
+			return -EEXIST;
 		else if (result < 0) {
 			parent = make_left(crnt);
 			crnt = crnt->left;
