@@ -1078,7 +1078,7 @@ static struct avlrcu_node *prealloc_unwind_double(struct avlrcu_ctxt *ctxt, stru
 	 */
 
 	/* common case for the inner nodes, no reason why we do rev. RRL */
-	if (likely(right->balance == 0 && left->balance == 0))
+	if (likely(left->balance == 0 && right->balance == 0))
 		return prealloc_reverse_rrl(ctxt, target);
 
 	// reverse RRL
@@ -1090,7 +1090,7 @@ static struct avlrcu_node *prealloc_unwind_double(struct avlrcu_ctxt *ctxt, stru
 		return prealloc_reverse_rlr(ctxt, target);
 
 	// poorly balanced case, rebalance left
-	if (right->balance == 0 && left->balance == 1) {
+	if (left->balance == 1 && right->balance == 0) {
 rebalance_left:
 		// rebalance the left subtree, then apply case 1
 		left = prealloc_rebalance(ctxt, left);
@@ -1100,7 +1100,7 @@ rebalance_left:
 	}
 
 	// poorly balanced case, rebalance right
-	if (right->balance == -1 && left->balance == 0) {
+	if (left->balance == 0 && right->balance == -1) {
 rebalance_right:
 		// rebalance the right subtree, then apply case 2
 		right = prealloc_rebalance(ctxt, right);
@@ -1110,7 +1110,7 @@ rebalance_right:
 	}
 
 	// both poorly balanced: rebalance the one with the least depth
-	if (right->balance == -1 && left->balance == 1) {
+	if (left->balance == 1 && right->balance == -1) {
 		poor_left = poor_balance_depth(ctxt, left);
 		poor_right = poor_balance_depth(ctxt, right);
 
@@ -1120,10 +1120,7 @@ rebalance_right:
 			goto rebalance_right;
 	}
 
-	/* did I miss something ? */
-	pr_err("%s: invalid case at "NODE_FMT", left "NODE_FMT", right "NODE_FMT"\n",
-		__func__, NODE_ARG(target), NODE_ARG(left), NODE_ARG(right));
-	BUG();
+	/* unreachable */
 	return NULL;
 }
 
