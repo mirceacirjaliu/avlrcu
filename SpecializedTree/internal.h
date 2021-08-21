@@ -1,4 +1,4 @@
-
+// SPDX-License-Identifier: GPL-2.0
 #ifndef _AVLRCU_INTERNAL_H_
 #define _AVLRCU_INTERNAL_H_
 

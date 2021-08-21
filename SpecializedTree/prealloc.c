@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Copyright (C) 2021 BitDefender
+ * Written by Mircea Cirjaliu
+ */
 
 #define pr_fmt(fmt)	KBUILD_MODNAME ": " fmt
 
