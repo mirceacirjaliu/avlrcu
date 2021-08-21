@@ -54,7 +54,7 @@ extern struct avlrcu_node *avlrcu_next(struct avlrcu_node *node);
 
 /**
  * avlrcu_for_each - iterate in-order over nodes in a tree
- * @pos:	the &struct avlrcu_node to use as a loop cursor.
+ * @pos:	the struct avlrcu_node * to use as a loop cursor.
  * @root:	the root of the tree.
  */
 #define avlrcu_for_each(pos, root)	\
@@ -72,43 +72,29 @@ extern struct avlrcu_node *avlrcu_next(struct avlrcu_node *node);
 	     pos = avlrcu_entry_safe(avlrcu_next(&(pos)->member), typeof(*(pos)), member))
 
 
-/* filters will have the same semantics as memcmp() */
+/* filters have the same semantics as memcmp() */
 typedef int (*filter)(const struct avlrcu_node *crnt, const void *arg);
 
 extern struct avlrcu_node *avlrcu_first_filter(struct avlrcu_root *root, filter f, const void *arg);
 extern struct avlrcu_node *avlrcu_next_filter(struct avlrcu_node *node, filter f, const void *arg);
 
+/**
+ * avlrcu_for_each_entry_filter() - iterate in-order over nodes that match condition
+ * @pos:	the type * to use as a loop cursor.
+ * @root:	the root of the tree.
+ * @member:	the name of the avlrcu_node within the struct.
+ * @filter:	filter callback to match a range of elements
+ * @arg:	filter arg to match nodes to
+ *
+ * Filters have the semantics of memcmp().
+ * They must return 0 for the range of nodes that match the arg.
+ * Iteration starts at the first element == 0 and stops at the first element > 0.
+ */
 #define avlrcu_for_each_entry_filter(pos, root, member, filter, arg)					\
 	for (pos = avlrcu_entry_safe(avlrcu_first_filter(root, filter, arg), typeof(*(pos)), member);	\
 	     pos != NULL;										\
 	     pos = avlrcu_entry_safe(avlrcu_next_filter(&(pos)->member, filter, arg), typeof(*(pos)), member))
 
-
- /* post-order iterator */
-extern struct avlrcu_node *avlrcu_first_po(struct avlrcu_root *root);
-extern struct avlrcu_node *avlrcu_next_po(struct avlrcu_node *node);
-
-#define avlrcu_for_each_po(pos, root)	\
-	for (pos = avlrcu_first_po(root); pos != NULL; pos = avlrcu_next_po(pos))
-
-#define avlrcu_for_each_entry_po(pos, root, member)					\
-	for (pos = avlrcu_entry_safe(avlrcu_first_po(root), typeof(*(pos)), member);	\
-	     pos != NULL;								\
-	     pos = avlrcu_entry_safe(avlrcu_next_po(&(pos)->member), typeof(*(pos)), member))
-
-/**
- * avlrcu_for_each_po_safe - iterate post-order over a tree safe against removal of nodes
- * @pos:	the &struct avlrcu_node to use as a loop cursor.
- * @n:		another &struct avlrcu_node to use as temporary storage
- * @root:	the root of the tree.
- *
- * Don't dare use this to delete nodes from a live tree.
- * Nodes must be first decoupled & made unreachable.
- */
-#define avlrcu_for_each_po_safe(pos, n, root)		\
-	for (pos = avlrcu_first_po(root);		\
-	     pos && ({ n = avlrcu_next_po(pos); 1; });	\
-	     pos = n)
 
 extern void avlrcu_init(struct avlrcu_root *root, struct avlrcu_ops *ops);
 

@@ -105,4 +105,55 @@ void prealloc_connect(struct avlrcu_root *root, struct avlrcu_node *branch);
 extern void prealloc_remove_old(struct avlrcu_ctxt *ctxt);
 extern void _delete_prealloc(struct avlrcu_ctxt *ctxt, struct avlrcu_node *prealloc);
 
+/* post-order iterator */
+extern struct avlrcu_node *avlrcu_first_po(struct avlrcu_root *root);
+extern struct avlrcu_node *avlrcu_next_po(struct avlrcu_node *node);
+
+#define avlrcu_for_each_po(pos, root)	\
+	for (pos = avlrcu_first_po(root); pos != NULL; pos = avlrcu_next_po(pos))
+
+#define avlrcu_for_each_entry_po(pos, root, member)					\
+	for (pos = avlrcu_entry_safe(avlrcu_first_po(root), typeof(*(pos)), member);	\
+	     pos != NULL;								\
+	     pos = avlrcu_entry_safe(avlrcu_next_po(&(pos)->member), typeof(*(pos)), member))
+
+/**
+ * avlrcu_for_each_po_safe - iterate post-order over a tree safe against removal of nodes
+ * @pos:	the struct avlrcu_node * to use as a loop cursor.
+ * @n:		another struct avlrcu_node * to use as temporary storage
+ * @root:	the root of the tree.
+ *
+ * Don't dare use this to delete nodes from a live tree.
+ * Nodes must be first decoupled & made unreachable.
+ */
+#define avlrcu_for_each_po_safe(pos, n, root)		\
+	for (pos = avlrcu_first_po(root);		\
+	     pos && ({ n = avlrcu_next_po(pos); 1; });	\
+	     pos = n)
+
+/* post-order iterator on the preallocated branch */
+extern struct avlrcu_node *prealloc_first_po(struct avlrcu_node *node);
+extern struct avlrcu_node *prealloc_next_po(struct avlrcu_node *node);
+
+#define avlrcu_for_each_prealloc_po(pos, root)	\
+	for (pos = prealloc_first_po(root);	\
+	     pos;				\
+	     pos = prealloc_next_po(pos))
+
+#define avlrcu_for_each_prealloc_po_safe(pos, n, root)		\
+	for (pos = prealloc_first_po(root);			\
+	     pos && ({ n = prealloc_next_po(pos); 1; });	\
+	     pos = n)
+
+/* reverse-in-order iteration on the preallocated branch */
+extern struct avlrcu_node *prealloc_first_rin(struct avlrcu_node *node);
+extern struct avlrcu_node *prealloc_next_rin(struct avlrcu_node *node);
+
+#define avlrcu_for_each_prealloc_rin(pos, root)	\
+	for (pos = prealloc_first_rin(root);	\
+	     pos != NULL;			\
+	     pos = prealloc_next_rin(pos))	\
+
+/* the preallocated branch/subtree doesn't have a root, just a root node */
+
 #endif /* _AVLRCU_INTERNAL_H_ */

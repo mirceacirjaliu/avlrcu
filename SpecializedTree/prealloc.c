@@ -35,7 +35,7 @@ static struct avlrcu_node *prealloc_left_deepest(struct avlrcu_node *node)
 	}
 }
 
-static struct avlrcu_node *prealloc_next_po(struct avlrcu_node *node)
+struct avlrcu_node *prealloc_next_po(struct avlrcu_node *node)
 {
 	struct avlrcu_node *parent;
 
@@ -56,7 +56,7 @@ static struct avlrcu_node *prealloc_next_po(struct avlrcu_node *node)
 }
 
 /* the preallocated branch/subtree doesn't have a root, just a root node */
-static struct avlrcu_node *prealloc_first_po(struct avlrcu_node *node)
+struct avlrcu_node *prealloc_first_po(struct avlrcu_node *node)
 {
 	if (!node)
 		return NULL;
@@ -65,17 +65,6 @@ static struct avlrcu_node *prealloc_first_po(struct avlrcu_node *node)
 
 	return prealloc_left_deepest(node);
 }
-
-/* iterate post-order only on the preallocated branch */
-#define avlrcu_for_each_prealloc_po(pos, root)	\
-	for (pos = prealloc_first_po(root);	\
-	     pos;					\
-	     pos = prealloc_next_po(pos))
-
-#define avlrcu_for_each_prealloc_po_safe(pos, n, root)		\
-	for (pos = prealloc_first_po(root);		\
-	     pos && ({ n = prealloc_next_po(pos); 1; });	\
-	     pos = prealloc_next_po(n))
 
 /*
  * _delete_prealloc() - delete prealloc branch/subtree in case of failure
@@ -142,7 +131,7 @@ struct avlrcu_node *prealloc_next_rin(struct avlrcu_node *node)
 }
 
 /* the preallocated branch/subtree doesn't have a root, just a root node */
-static struct avlrcu_node *prealloc_first_rin(struct avlrcu_node *node)
+struct avlrcu_node *prealloc_first_rin(struct avlrcu_node *node)
 {
 	if (!node)
 		return NULL;
@@ -151,11 +140,6 @@ static struct avlrcu_node *prealloc_first_rin(struct avlrcu_node *node)
 
 	return prealloc_rightmost_rin(node);
 }
-
-#define avlrcu_for_each_prealloc_rin(pos, root)	\
-	for (pos = prealloc_first_rin(root);	\
-	     pos != NULL;			\
-	     pos = prealloc_next_rin(pos))	\
 
 /**
  * prealloc_connect() - insert the new branch in a tree

@@ -231,18 +231,14 @@ struct avlrcu_node *avlrcu_next_filter(struct avlrcu_node *node, filter f, const
 /* post-order iteration */
 static struct avlrcu_node *avlrcu_left_deepest(struct avlrcu_node *node)
 {
-	struct avlrcu_node *next;
-
 	for (;;) {
-		next = rcu_access_pointer(node->left);
-		if (next) {
-			node = next;
+		if (node->left) {
+			node = node->left;
 			continue;
 		}
 
-		next = rcu_access_pointer(node->right);
-		if (next) {
-			node = next;
+		if (node->right) {
+			node = node->right;
 			continue;
 		}
 
@@ -252,33 +248,30 @@ static struct avlrcu_node *avlrcu_left_deepest(struct avlrcu_node *node)
 
 extern struct avlrcu_node *avlrcu_first_po(struct avlrcu_root *root)
 {
-	struct avlrcu_node *next = rcu_access_pointer(root->root);
-
-	if (unlikely(!next))
+	if (unlikely(!root->root))
 		return NULL;
 
-	return avlrcu_left_deepest(next);
+	return avlrcu_left_deepest(root->root);
 }
 
 extern struct avlrcu_node *avlrcu_next_po(struct avlrcu_node *node)
 {
-	struct avlrcu_node *parent, *next;
+	struct avlrcu_node *parent;
 
-	if (!node)
+	if (unlikely(!node))
 		return NULL;
 
-	parent = rcu_access_pointer(node->parent);
-	if (!is_root(parent) && is_left_child(parent)) {
-		parent = strip_flags(parent);
-		next = rcu_access_pointer(parent->right);
-		if (next)
-			return avlrcu_left_deepest(next);
+	parent = get_parent(node);
+	if (!is_root(parent) && is_left_child(node->parent)) {
+		if (parent->right)
+			return avlrcu_left_deepest(parent->right);
 		else
 			return parent;
 	}
 	else
-		return strip_flags(parent);
+		return parent;
 }
+
 
 static struct avlrcu_node *fix_diff_height(struct avlrcu_ctxt *ctxt, struct avlrcu_node *prealloc)
 {
