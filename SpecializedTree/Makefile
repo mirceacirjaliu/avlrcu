@@ -13,19 +13,18 @@ ifneq ($(KERNELRELEASE),)
 # Otherwise we were called directly from the command
 # line; invoke the kernel build system.
 else
-	KERNEL = $(shell uname -r)
-	KERNELDIR ?= /lib/modules/$(KERNEL)/build
+	KDIR ?= /lib/modules/$(shell uname -r)/build
 	PWD := $(shell pwd)
 
 .PHONY: all clean install
 
 all:
-	make -C $(KERNELDIR) M=$(PWD) modules
+	make -C $(KDIR) M=$(PWD) modules
 
 clean:
-	make -C $(KERNELDIR) M=$(PWD) clean
+	make -C $(KDIR) M=$(PWD) clean
 
 install:
-	make -c $(KERNELDIR) M=$(PWD) install
+	make -C $(KDIR) M=$(PWD) modules_install
 
 endif
