@@ -104,7 +104,7 @@ bool validate_avl_balancing(struct avlrcu_root *root)
  * The cmp() callback has the same semantics as memcmp().
  * If a match is found, it is returned.
  */
-struct avlrcu_node *avlrcu_search(struct avlrcu_root *root, const struct avlrcu_node *match)
+const struct avlrcu_node *avlrcu_search(const struct avlrcu_root *root, const struct avlrcu_node *match)
 {
 	struct avlrcu_ops *ops = root->ops;
 	struct avlrcu_node *crnt;
@@ -125,11 +125,39 @@ struct avlrcu_node *avlrcu_search(struct avlrcu_root *root, const struct avlrcu_
 	return crnt;
 }
 
+/*
+ * write_search() - write-side search (no RCU dereferencing, no const)
+ * @root	root of the tree
+ * @match	node to match against
+ *
+ * Uses the cmp() callback to find the node that will be modified.
+ * TODO: can this be merged with the read-side search
+ *       that actually generates shorter code ?
+ */
+struct avlrcu_node *write_search(struct avlrcu_root *root, const struct avlrcu_node *match)
+{
+	struct avlrcu_ops *ops = root->ops;
+	struct avlrcu_node *crnt = root->root;
+	int result;
+
+	while (crnt) {
+		result = ops->cmp(match, crnt);
+
+		if (result == 0)
+			break;
+		else if (result < 0)
+			crnt = crnt->left;
+		else
+			crnt = crnt->right;
+	}
+
+	return crnt;
+}
 
 /* in-order iteration */
-static struct avlrcu_node *avlrcu_leftmost(struct avlrcu_node *node)
+static const struct avlrcu_node *avlrcu_leftmost(const struct avlrcu_node *node)
 {
-	struct avlrcu_node *next;
+	const struct avlrcu_node *next;
 
 	/* descend along the left branch */
 	for (;;) {
@@ -143,9 +171,9 @@ static struct avlrcu_node *avlrcu_leftmost(struct avlrcu_node *node)
 	}
 }
 
-static struct avlrcu_node *avlrcu_successor(struct avlrcu_node *node)
+static const struct avlrcu_node *avlrcu_successor(const struct avlrcu_node *node)
 {
-	struct avlrcu_node *next;
+	const struct avlrcu_node *next;
 
 	/* ascend along the right branch */
 	for (;;) {
@@ -161,9 +189,9 @@ static struct avlrcu_node *avlrcu_successor(struct avlrcu_node *node)
 	}
 }
 
-struct avlrcu_node *avlrcu_first(struct avlrcu_root *root)
+const struct avlrcu_node *avlrcu_first(const struct avlrcu_root *root)
 {
-	struct avlrcu_node *next = rcu_access_pointer(root->root);
+	const struct avlrcu_node *next = rcu_access_pointer(root->root);
 
 	if (unlikely(!next))
 		return NULL;
@@ -171,9 +199,9 @@ struct avlrcu_node *avlrcu_first(struct avlrcu_root *root)
 	return avlrcu_leftmost(next);
 }
 
-struct avlrcu_node *avlrcu_next(struct avlrcu_node *node)
+const struct avlrcu_node *avlrcu_next(const struct avlrcu_node *node)
 {
-	struct avlrcu_node *next;
+	const struct avlrcu_node *next;
 
 	/* in-order LNR -> next is right */
 	next = rcu_access_pointer(node->right);
@@ -183,7 +211,7 @@ struct avlrcu_node *avlrcu_next(struct avlrcu_node *node)
 	return avlrcu_successor(node);
 }
 
-struct avlrcu_node *avlrcu_first_filter(struct avlrcu_root *root, filter f, const void *arg)
+const struct avlrcu_node *avlrcu_first_filter(const struct avlrcu_root *root, filter f, const void *arg)
 {
 	struct avlrcu_node *subroot = rcu_access_pointer(root->root);
 	struct avlrcu_node *left, *right, *first = NULL;
@@ -213,9 +241,9 @@ struct avlrcu_node *avlrcu_first_filter(struct avlrcu_root *root, filter f, cons
 	return first;
 }
 
-struct avlrcu_node *avlrcu_next_filter(struct avlrcu_node *node, filter f, const void *arg)
+const struct avlrcu_node *avlrcu_next_filter(const struct avlrcu_node *node, filter f, const void *arg)
 {
-	struct avlrcu_node *next;
+	const struct avlrcu_node *next;
 
 	ASSERT(node && f(node, arg) == 0);
 
@@ -340,7 +368,7 @@ int avlrcu_test_ror(struct avlrcu_root *root, const struct avlrcu_node *match)
 	struct avlrcu_node *prealloc;
 	struct avlrcu_ctxt ctxt;
 
-	target = avlrcu_search(root, match);
+	target = write_search(root, match);
 	if (!target)
 		return -ENXIO;
 
@@ -395,7 +423,7 @@ int avlrcu_test_rol(struct avlrcu_root *root, const struct avlrcu_node *match)
 	struct avlrcu_node *prealloc;
 	struct avlrcu_ctxt ctxt;
 
-	target = avlrcu_search(root, match);
+	target = write_search(root, match);
 	if (!target)
 		return -ENXIO;
 
@@ -453,7 +481,7 @@ int avlrcu_test_rrl(struct avlrcu_root *root, const struct avlrcu_node *match)
 	struct avlrcu_node *prealloc;
 	struct avlrcu_ctxt ctxt;
 
-	target = avlrcu_search(root, match);
+	target = write_search(root, match);
 	if (!target)
 		return -ENXIO;
 
@@ -515,7 +543,7 @@ int avlrcu_test_rlr(struct avlrcu_root *root, const struct avlrcu_node *match)
 	struct avlrcu_node *prealloc;
 	struct avlrcu_ctxt ctxt;
 
-	target = avlrcu_search(root, match);
+	target = write_search(root, match);
 	if (!target)
 		return -ENXIO;
 
@@ -554,7 +582,7 @@ int avlrcu_test_unwind(struct avlrcu_root *root, const struct avlrcu_node *match
 	struct avlrcu_node *prealloc;
 	struct avlrcu_ctxt ctxt;
 
-	target = avlrcu_search(root, match);
+	target = write_search(root, match);
 	if (!target)
 		return -ENXIO;
 

@@ -26,7 +26,7 @@ struct avlrcu_ops {
 	void (*free)(struct avlrcu_node *);
 	void (*free_rcu)(struct avlrcu_node *);
 	int (*cmp)(const struct avlrcu_node *, const struct avlrcu_node *);
-	void (*copy)(struct avlrcu_node *, struct avlrcu_node *);
+	void (*copy)(struct avlrcu_node *, const struct avlrcu_node *);
 };
 
 struct avlrcu_root {
@@ -44,13 +44,13 @@ struct avlrcu_root {
 	container_of(ptr, type, member)
 
 #define avlrcu_entry_safe(ptr, type, member)	\
-	({ typeof(ptr) ____ptr = (ptr);		\
+	({ __auto_type ____ptr = (ptr);		\
 	   ____ptr ? avlrcu_entry(____ptr, type, member) : NULL; \
 	})
 
 /* in-order iterator */
-extern struct avlrcu_node *avlrcu_first(struct avlrcu_root *root);
-extern struct avlrcu_node *avlrcu_next(struct avlrcu_node *node);
+extern const struct avlrcu_node *avlrcu_first(const struct avlrcu_root *root);
+extern const struct avlrcu_node *avlrcu_next(const struct avlrcu_node *node);
 
 /**
  * avlrcu_for_each - iterate in-order over nodes in a tree
@@ -73,10 +73,10 @@ extern struct avlrcu_node *avlrcu_next(struct avlrcu_node *node);
 
 
 /* filters have the same semantics as memcmp() */
-typedef int (*filter)(const struct avlrcu_node *crnt, const void *arg);
+typedef int (*filter)(const struct avlrcu_node *node, const void *arg);
 
-extern struct avlrcu_node *avlrcu_first_filter(struct avlrcu_root *root, filter f, const void *arg);
-extern struct avlrcu_node *avlrcu_next_filter(struct avlrcu_node *node, filter f, const void *arg);
+extern const struct avlrcu_node *avlrcu_first_filter(const struct avlrcu_root *root, filter f, const void *arg);
+extern const struct avlrcu_node *avlrcu_next_filter(const struct avlrcu_node *node, filter f, const void *arg);
 
 /**
  * avlrcu_for_each_entry_filter() - iterate in-order over nodes that match condition
@@ -111,6 +111,6 @@ extern int avlrcu_test_rrl(struct avlrcu_root *root, const struct avlrcu_node *m
 extern int avlrcu_test_rlr(struct avlrcu_root *root, const struct avlrcu_node *match);
 
 /* read-side calls, must be protected by (S)RCU section */
-extern struct avlrcu_node *avlrcu_search(struct avlrcu_root *root, const struct avlrcu_node *match);
+extern const struct avlrcu_node *avlrcu_search(const struct avlrcu_root *root, const struct avlrcu_node *match);
 
 #endif /* _AVLRCU_H_ */

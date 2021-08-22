@@ -28,42 +28,42 @@ struct avlrcu_ctxt {
 #define LEFT_CHILD 1
 #define PARENT_FLAGS 1
 
-static inline bool is_avl(struct avlrcu_node *node)
+static inline bool is_avl(const struct avlrcu_node *node)
 {
 	return node->balance >= -1 && node->balance <= 1;
 }
 
-static inline bool is_leaf(struct avlrcu_node *node)
+static inline bool is_leaf(const struct avlrcu_node *node)
 {
 	return node->left == NULL && node->right == NULL;
 }
 
-static inline bool is_root(struct avlrcu_node *parent)
+static inline bool is_root(const struct avlrcu_node *parent)
 {
 	return parent == NULL;
 }
 
-static inline bool is_left_child(struct avlrcu_node *parent)
+static inline bool is_left_child(const struct avlrcu_node *parent)
 {
 	return (unsigned long)parent & LEFT_CHILD;
 }
 
-static inline struct avlrcu_node *strip_flags(struct avlrcu_node *parent)
+static inline struct avlrcu_node *strip_flags(const struct avlrcu_node *parent)
 {
 	return (struct avlrcu_node *)((unsigned long)parent & ~PARENT_FLAGS);
 }
 
-static inline struct avlrcu_node *make_left(struct avlrcu_node *parent)
+static inline struct avlrcu_node *make_left(const struct avlrcu_node *parent)
 {
 	return (struct avlrcu_node *)((unsigned long)parent | LEFT_CHILD);
 }
 
-static inline struct avlrcu_node *make_right(struct avlrcu_node *parent)
+static inline struct avlrcu_node *make_right(const struct avlrcu_node *parent)
 {
 	return (struct avlrcu_node *)((unsigned long)parent & ~LEFT_CHILD);
 }
 
-static inline struct avlrcu_node *get_parent(struct avlrcu_node *node)
+static inline struct avlrcu_node *get_parent(const struct avlrcu_node *node)
 {
 	return strip_flags(node->parent);
 }
@@ -87,6 +87,7 @@ static inline bool is_new_branch(struct avlrcu_node *node)
 #define NODE_FMT "(%lx, %ld)"
 #define NODE_ARG(_node) (long)(_node), (long)(_node)->balance
 
+extern struct avlrcu_node *write_search(struct avlrcu_root *root, const struct avlrcu_node *match);
 extern struct avlrcu_node *prealloc_replace(struct avlrcu_ctxt *ctxt, struct avlrcu_node *target);
 extern struct avlrcu_node *prealloc_parent(struct avlrcu_ctxt *ctxt, struct avlrcu_node *child);
 extern struct avlrcu_node *prealloc_child(struct avlrcu_ctxt *ctxt, struct avlrcu_node *parent, int which);

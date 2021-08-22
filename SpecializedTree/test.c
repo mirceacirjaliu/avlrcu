@@ -83,7 +83,7 @@ static int test_cmp(const struct avlrcu_node *match, const struct avlrcu_node *c
 	return (int)((long)container_match->address - (long)container_crnt->address);
 }
 
-static void test_copy(struct avlrcu_node *to, struct avlrcu_node *from)
+static void test_copy(struct avlrcu_node *to, const struct avlrcu_node *from)
 {
 	struct test_avlrcu_node *container_to;
 	struct test_avlrcu_node *container_from;
@@ -392,11 +392,11 @@ static ssize_t rlr_map(struct file *file, const char __user *data, size_t count,
 
 static void *dump_gv_start(struct seq_file *s, loff_t *pos)
 {
-	struct avlrcu_node *node = s->private;
+	const struct avlrcu_node *node = s->private;
 
 	/* new session */
 	if (node)
-		return node;
+		return (void *)node;
 
 	/* past end of file condition */
 	if (*pos)
@@ -405,25 +405,25 @@ static void *dump_gv_start(struct seq_file *s, loff_t *pos)
 	node = avlrcu_first(&avlrcu_range);
 	if (!node)
 		node = DUMMY_NODE_END_OF_TREE;
-	s->private = node;
+	s->private = (void *)node;
 
 	/* print header */
 	seq_puts(s, "digraph G {\n");
 	seq_puts(s, "\troot [label=\"ROOT\", shape=box]\n");
 
-	return node;
+	return (void *)node;
 }
 
 static int dump_gv_show(struct seq_file *s, void *v)
 {
-	struct avlrcu_node *node = s->private;
-	struct avlrcu_node *parent, *left, *right;
-	struct test_avlrcu_node *container;
+	const struct avlrcu_node *node = s->private;
+	const struct avlrcu_node *parent, *left, *right;
+	const struct test_avlrcu_node *container;
 
 	if (unlikely(node == DUMMY_NODE_END_OF_TREE))
 		return 0;
 
-	parent = node->parent;
+	parent = get_parent(node);
 	left = node->left;
 	right = node->right;
 	container = avlrcu_entry(node, struct test_avlrcu_node, node);
@@ -445,13 +445,13 @@ static int dump_gv_show(struct seq_file *s, void *v)
 		seq_printf(s, "\tn%lx -> root [headport=s, tailport=n, style=dotted, color=lightgrey]\n",
 			(unsigned long)node);
 	}
-	else if (is_left_child(parent)) {
+	else if (is_left_child(node->parent)) {
 		seq_printf(s, "\tn%lx -> n%lx [headport=w, tailport=n, style=dotted, color=lightgrey]\n",
-			(unsigned long)node, (unsigned long)strip_flags(parent));
+			(unsigned long)node, (unsigned long)parent);
 	}
 	else {
 		seq_printf(s, "\tn%lx -> n%lx [headport=e, tailport=n, style=dotted, color=lightgrey]\n",
-			(unsigned long)node, (unsigned long)strip_flags(parent));
+			(unsigned long)node, (unsigned long)parent);
 	}
 
 	return 0;
@@ -459,7 +459,7 @@ static int dump_gv_show(struct seq_file *s, void *v)
 
 static void *dump_gv_next(struct seq_file *s, void *v, loff_t *pos)
 {
-	struct avlrcu_node *node = s->private;
+	const struct avlrcu_node *node = s->private;
 
 	(*pos)++;
 	if (node == DUMMY_NODE_END_OF_TREE)
@@ -471,13 +471,13 @@ static void *dump_gv_next(struct seq_file *s, void *v, loff_t *pos)
 		return NULL;
 	}
 
-	s->private = node;
-	return node;
+	s->private = (void *)node;
+	return (void *)node;
 }
 
 static void dump_gv_stop(struct seq_file *s, void *v)
 {
-	struct avlrcu_node *node = s->private;
+	const struct avlrcu_node *node = s->private;
 
 	/* print footer, do not react on NULL */
 	if (node == DUMMY_NODE_END_OF_TREE) {
@@ -653,8 +653,8 @@ static ssize_t find_read(struct file *f, char __user *buf, size_t size, loff_t *
 	unsigned long page;
 	char *kbuf;
 	int count = 0;
-	struct test_avlrcu_node *container;
-	struct avlrcu_node *node;
+	const struct avlrcu_node *node;
+	const struct test_avlrcu_node *container;
 
 	pr_debug("%s: size = %d, offset = %d\n", __func__, (int)size, (int)*offset);
 
@@ -680,7 +680,7 @@ static ssize_t find_read(struct file *f, char __user *buf, size_t size, loff_t *
 		};
 
 		node = avlrcu_search(&avlrcu_range, &match.node);
-		container = avlrcu_entry_safe(node, struct test_avlrcu_node, node);
+		container = avlrcu_entry_safe(node, const struct test_avlrcu_node, node);
 		if (container) {
 			count = sprintf(kbuf, "%lx ", container->address);
 			kbuf += count;

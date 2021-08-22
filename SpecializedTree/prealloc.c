@@ -1521,7 +1521,7 @@ struct avlrcu_node *avlrcu_delete(struct avlrcu_root *root, const struct avlrcu_
 		return ERR_PTR(-EINVAL);
 	}
 
-	target = avlrcu_search(root, match);
+	target = write_search(root, match);
 	if (!target)
 		return ERR_PTR(-ENXIO);
 
