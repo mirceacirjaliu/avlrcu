@@ -166,8 +166,13 @@ static ssize_t insert_map(struct file *file, const char __user *data, size_t cou
 	if (IS_ERR_VALUE((long)result))
 		return result;
 
+	/* invalid value 0, need it for other purposes */
+	if (value == 0)
+		return -EINVAL;
+
 	pr_debug("%s: at %lx\n", __func__, value);
 
+	/* allocate a container object & populate it */
 	container = kzalloc(sizeof(struct test_avlrcu_node), GFP_ATOMIC);
 	if (!container)
 		return -ENOMEM;
@@ -190,21 +195,59 @@ static ssize_t insert_map(struct file *file, const char __user *data, size_t cou
 	return count;
 }
 
+static unsigned long parse_input(const char __user *data, size_t count)
+{
+	char buf[32], *eol;
+	unsigned long input;
+	int result;
+
+	if (count > 32)
+		return -E2BIG;
+
+	// populate NULLs
+	memset(buf, 0, 32);
+
+	// all NULLs can be lost during copying
+	if (copy_from_user(buf, data, count))
+		return -EFAULT;
+
+	// make sure the string is NULL-terminated
+	eol = strchr(buf, '\n');
+	if (eol)
+		*eol = '\0';
+
+	// can be 'root' or a number
+	if (!strncmp(buf, "root", 4))
+		input = 0;
+	else {
+		result = kstrtoul(buf, 16, &input);
+		if (IS_ERR_VALUE((long)result))
+			return result;
+	}
+
+	return input;
+}
+
 static ssize_t delete_map(struct file *file, const char __user *data, size_t count, loff_t *offs)
 {
 	struct test_avlrcu_node match;
 	struct avlrcu_node *node;
 	struct test_avlrcu_node *container;
-	int result;
+	int result = 0;
 
-	result = kstrtoul_from_user(data, count, 16, &match.address);
-	if (IS_ERR_VALUE((long)result))
-		return result;
+	/* 0 for root or an address or error value */
+	match.address = parse_input(data, count);
+	if (IS_ERR_VALUE(match.address))
+		return match.address;
 
 	pr_debug("%s: at %lx\n", __func__, match.address);
 
 	/* these have to match with the allocation functions */
 	spin_lock(&lock);
+
+	// get the key of the root
+	if (match.address == 0 && avlrcu_range.root)
+		match.address = avlrcu_entry(avlrcu_range.root, struct test_avlrcu_node, node)->address;
 
 	node = avlrcu_delete(&avlrcu_range, &match.node);
 
@@ -236,14 +279,19 @@ static ssize_t unwind_map(struct file *file, const char __user *data, size_t cou
 	struct test_avlrcu_node match;
 	int result;
 
-	result = kstrtoul_from_user(data, count, 16, &match.address);
-	if (IS_ERR_VALUE((long)result))
-		return result;
+	/* 0 for root or an address or error value */
+	match.address = parse_input(data, count);
+	if (IS_ERR_VALUE(match.address))
+		return match.address;
 
 	pr_debug("%s: at %lx\n", __func__, match.address);
 
 	/* these have to match with the allocation functions */
 	spin_lock(&lock);
+
+	// get the key of the root
+	if (match.address == 0 && avlrcu_range.root)
+		match.address = avlrcu_entry(avlrcu_range.root, struct test_avlrcu_node, node)->address;
 
 	result = avlrcu_test_unwind(&avlrcu_range, &match.node);
 
@@ -278,14 +326,19 @@ static ssize_t ror_map(struct file *file, const char __user *data, size_t count,
 	struct test_avlrcu_node match;
 	int result;
 
-	result = kstrtoul_from_user(data, count, 16, &match.address);
-	if (IS_ERR_VALUE((long)result))
-		return result;
+	/* 0 for root or an address or error value */
+	match.address = parse_input(data, count);
+	if (IS_ERR_VALUE(match.address))
+		return match.address;
 
 	pr_debug("%s: at %lx\n", __func__, match.address);
 
 	/* these have to match with the allocation functions */
 	spin_lock(&lock);
+
+	// get the key of the root
+	if (match.address == 0 && avlrcu_range.root)
+		match.address = avlrcu_entry(avlrcu_range.root, struct test_avlrcu_node, node)->address;
 
 	result = avlrcu_test_ror(&avlrcu_range, &match.node);
 
@@ -306,14 +359,19 @@ static ssize_t rol_map(struct file *file, const char __user *data, size_t count,
 	struct test_avlrcu_node match;
 	int result;
 
-	result = kstrtoul_from_user(data, count, 16, &match.address);
-	if (IS_ERR_VALUE((long)result))
-		return result;
+	/* 0 for root or an address or error value */
+	match.address = parse_input(data, count);
+	if (IS_ERR_VALUE(match.address))
+		return match.address;
 
 	pr_debug("%s: at %lx\n", __func__, match.address);
 
 	/* these have to match with the allocation functions */
 	spin_lock(&lock);
+
+	// get the key of the root
+	if (match.address == 0 && avlrcu_range.root)
+		match.address = avlrcu_entry(avlrcu_range.root, struct test_avlrcu_node, node)->address;
 
 	result = avlrcu_test_rol(&avlrcu_range, &match.node);
 
@@ -334,14 +392,19 @@ static ssize_t rrl_map(struct file *file, const char __user *data, size_t count,
 	struct test_avlrcu_node match;
 	int result;
 
-	result = kstrtoul_from_user(data, count, 16, &match.address);
-	if (IS_ERR_VALUE((long)result))
-		return result;
+	/* 0 for root or an address or error value */
+	match.address = parse_input(data, count);
+	if (IS_ERR_VALUE(match.address))
+		return match.address;
 
 	pr_debug("%s: at %lx\n", __func__, match.address);
 
 	/* these have to match with the allocation functions */
 	spin_lock(&lock);
+
+	// get the key of the root
+	if (match.address == 0 && avlrcu_range.root)
+		match.address = avlrcu_entry(avlrcu_range.root, struct test_avlrcu_node, node)->address;
 
 	result = avlrcu_test_rrl(&avlrcu_range, &match.node);
 
@@ -362,14 +425,19 @@ static ssize_t rlr_map(struct file *file, const char __user *data, size_t count,
 	struct test_avlrcu_node match;
 	int result;
 
-	result = kstrtoul_from_user(data, count, 16, &match.address);
-	if (IS_ERR_VALUE((long)result))
-		return result;
+	/* 0 for root or an address or error value */
+	match.address = parse_input(data, count);
+	if (IS_ERR_VALUE(match.address))
+		return match.address;
 
 	pr_debug("%s: at %lx\n", __func__, match.address);
 
 	/* these have to match with the allocation functions */
 	spin_lock(&lock);
+
+	// get the key of the root
+	if (match.address == 0 && avlrcu_range.root)
+		match.address = avlrcu_entry(avlrcu_range.root, struct test_avlrcu_node, node)->address;
 
 	result = avlrcu_test_rlr(&avlrcu_range, &match.node);
 

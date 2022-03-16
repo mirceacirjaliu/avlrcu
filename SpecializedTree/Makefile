@@ -8,7 +8,9 @@ ifneq ($(KERNELRELEASE),)
 	# TODO: also need a build flag that enables the test interface: AVLRCU_TEST
 	# TODO: AVLRCU_TEST enables AVLRCU_DEBUG
 
-	# += -O1 -fno-inline
+	#CFLAGS_test.o  += -O1 -fno-inline
+	#CFLAGS_tree.o  += -O1 -fno-inline
+	#CFLAGS_prealloc.o  += -O1 -fno-inline
 
 # Otherwise we were called directly from the command
 # line; invoke the kernel build system.
