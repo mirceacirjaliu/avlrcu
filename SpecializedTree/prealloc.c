@@ -638,38 +638,22 @@ struct balance_factors
 
 static int rol_height_diff(int root_bal, int pivot_bal)
 {
-	int diff = 0;
-
-	if (pivot_bal <= 0) {
-		if (root_bal <= 0)
-			diff = 1;
-	}
-	else {
-		if (root_bal <= 0)
-			diff = 1;
-		else if (root_bal > 1)
-			diff = -1;
-	}
-
-	return diff;
+	if (root_bal <= 0)
+		return 1;
+	else if (pivot_bal > 0 && root_bal > 1)
+		return -1;
+	else
+		return 0;
 }
 
 static int ror_height_diff(int root_bal, int pivot_bal)
 {
-	int diff = 0;
-
-	if (pivot_bal >= 0) {
-		if (root_bal >= 0)
-			diff = 1;
-	}
-	else {
-		if (root_bal >= 0)
-			diff = 1;
-		else if (root_bal < -1)
-			diff = -1;
-	}
-
-	return diff;
+	if (root_bal >= 0)
+		return 1;
+	else if (pivot_bal < 0 && root_bal < -1)
+		return -1;
+	else
+		return 0;
 }
 
 static struct balance_factors rol_new_balance(int root_bal, int pivot_bal)
@@ -690,7 +674,6 @@ static struct balance_factors rol_new_balance(int root_bal, int pivot_bal)
 		else
 			new_balance.root = root_bal - 2;
 	}
-
 
 	return new_balance;
 }
