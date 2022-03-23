@@ -71,6 +71,7 @@ static void test_free_rcu(struct avlrcu_node *node)
 	kfree_rcu(container, node.rcu);
 }
 
+// match <=> current
 static int test_cmp(const struct avlrcu_node *match, const struct avlrcu_node *crnt)
 {
 	struct test_avlrcu_node *container_match;
@@ -79,8 +80,13 @@ static int test_cmp(const struct avlrcu_node *match, const struct avlrcu_node *c
 	container_match = avlrcu_entry(match, struct test_avlrcu_node, node);
 	container_crnt = avlrcu_entry(crnt, struct test_avlrcu_node, node);
 
-	// watch out for truncation !!
-	return (int)((long)container_match->address - (long)container_crnt->address);
+	//return container_match->address <=> container_crnt->address;
+	if (container_match->address > container_crnt->address)
+		return 1;
+	else if (container_match->address < container_crnt->address)
+		return -1;
+	else
+		return 0;
 }
 
 static void test_copy(struct avlrcu_node *to, const struct avlrcu_node *from)
