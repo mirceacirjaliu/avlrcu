@@ -1256,6 +1256,7 @@ error:
 static struct avlrcu_node *prealloc_fix(struct avlrcu_ctxt *ctxt, struct avlrcu_node *parent)
 {
 	struct avlrcu_node *node;
+	struct avlrcu_node *pivot;
 
 	ASSERT(is_new_branch(parent));
 
@@ -1265,13 +1266,28 @@ static struct avlrcu_node *prealloc_fix(struct avlrcu_ctxt *ctxt, struct avlrcu_
 
 		switch (node->balance) {
 		case -2:
-			node = prealloc_rlr(ctxt, node);
+			pivot = node->left;
+			if (pivot->balance == -1)
+				// this is equivalent to a conditioning on pivot...
+				// ...followed by a RLR on node
+				node = prealloc_ror(ctxt, node);
+			else
+				node = prealloc_rlr(ctxt, node);
 			break;
 
 		case 2:
-			node = prealloc_rrl(ctxt, node);
+			pivot = node->right;
+			if (pivot->balance == 1)
+				// this is equivalent to a conditioning on pivot...
+				// ...followed by a RRL on node
+				node = prealloc_rol(ctxt, node);
+			else
+				node = prealloc_rrl(ctxt, node);
 			break;
 		}
+		// TODO: this looks like the delete_retrace() algorithm without the allocations
+		// TODO: because we are working on the preallocated branch
+		// TODO: maybe these functions can be merged ?
 
 		parent = get_parent(node);
 	} while (!is_root(parent) && is_new_branch(parent));
