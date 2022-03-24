@@ -512,9 +512,50 @@ static struct avlrcu_node *prealloc_retrace_rrl(struct avlrcu_node *target)
 }
 
 /*
- * prealloc_retrace() - retrace for insert
+ * retrace_catch_up() - allocate new branch parent by parent
  * @ctxt	AVL operations environment
- * @node	newly inserted node that starts the preallocated branch
+ * @node	node starting the preallocated branch
+ * @last	last parent to be replaced by new node
+ *
+ * There are cases in insertion (in a well balanced tree) where nodes are replaced
+ * only to have their balance factor modified. No rotations are really done.
+ * An optimization is possible where the balance factors can be replaced on the old nodes,
+ * then the new branch can catch up & replace the nodes if a rotation is needed.
+ *
+ * Returns the top of the preallocated branch on success or NULL on error.
+ * The only possible error case is memory allocation failure.
+ */
+static struct avlrcu_node *retrace_catch_up(struct avlrcu_ctxt *ctxt, struct avlrcu_node *node, struct avlrcu_node *last)
+{
+	struct avlrcu_node *parent;
+	struct avlrcu_node *new_parent;
+
+	ASSERT(is_new_branch(node));
+	ASSERT(!is_new_branch(last));
+
+	do {
+		parent = get_parent(node);
+		ASSERT(!is_root(parent));
+
+		new_parent = prealloc_parent(ctxt, node);
+		if (unlikely(!new_parent))
+			goto error;
+
+		node = new_parent;
+	} while (parent != last);
+
+	return node;
+
+error:
+	_delete_prealloc(ctxt, node);
+
+	return NULL;
+}
+
+/*
+ * insert_retrace() - retrace for insert
+ * @ctxt	AVL operations environment
+ * @prealloc	newly inserted node that starts the preallocated branch
  *
  * The classic retrace on insert algorithm.
  * Runs as long as there is an increase in height present.
@@ -523,28 +564,22 @@ static struct avlrcu_node *prealloc_retrace_rrl(struct avlrcu_node *target)
  *
  * Returns the top of the preallocated branch on success or NULL on error.
  * The only possible error case is memory allocation failure.
- *
- * TODO: there are cases in insertion (in a well balanced tree) where nodes are replaced...
- *	 ... only to have their balance factor modified (else branch, parent is balanced)
- * TODO: no rotations are really done
- * TODO: an optimization is possible where the balance factors can be replaced on the old nodes...
- *	 ... then the new branch can catch up & replace the nodes if a rotation is needed
  */
-static struct avlrcu_node *prealloc_retrace(struct avlrcu_ctxt *ctxt, struct avlrcu_node *node)
+static struct avlrcu_node *insert_retrace(struct avlrcu_ctxt *ctxt, struct avlrcu_node *prealloc)
 {
-	struct avlrcu_node *parent;
+	struct avlrcu_node *node, *parent;
 
-	ASSERT(is_new_branch(node));
+	ASSERT(is_new_branch(prealloc));
 
-	for (parent = get_parent(node); !is_root(parent); node = parent, parent = get_parent(node)) {
-
-		parent = prealloc_parent(ctxt, node);
-		if (!parent)
-			goto error;
-
+	for (node = prealloc, parent = get_parent(node); !is_root(parent); node = parent, parent = get_parent(node)) {
 		if (is_left_child(node->parent)) {
 			// parent is left-heavy
 			if (parent->balance < 0) {
+				// rotation is needed
+				parent = retrace_catch_up(ctxt, prealloc, parent);
+				if (unlikely(!parent))
+					goto revert;
+
 				// node is right-heavy
 				if (node->balance > 0)
 					parent = prealloc_retrace_rlr(parent);
@@ -557,7 +592,7 @@ static struct avlrcu_node *prealloc_retrace(struct avlrcu_ctxt *ctxt, struct avl
 			else if (parent->balance > 0) {
 				parent->balance = 0;			/* parent becomes balanced */
 
-				return parent;
+				return prealloc;
 			}
 			// parent is balanced
 			else {
@@ -568,6 +603,11 @@ static struct avlrcu_node *prealloc_retrace(struct avlrcu_ctxt *ctxt, struct avl
 		else {
 			// parent is right heavy
 			if (parent->balance > 0) {
+				// rotation is needed
+				parent = retrace_catch_up(ctxt, prealloc, parent);
+				if (unlikely(!parent))
+					goto revert;
+
 				// node is left-heavy
 				if (node->balance < 0)
 					parent = prealloc_retrace_rrl(parent);
@@ -580,7 +620,7 @@ static struct avlrcu_node *prealloc_retrace(struct avlrcu_ctxt *ctxt, struct avl
 			else if (parent->balance < 0) {
 				parent->balance = 0;			/* parent becomes balanced */
 
-				return parent;
+				return prealloc;
 			}
 			// parent is balanced
 			else {
@@ -589,11 +629,20 @@ static struct avlrcu_node *prealloc_retrace(struct avlrcu_ctxt *ctxt, struct avl
 		}
 	}
 
-	return node;
+	return prealloc;
 
-error:
-	// node should have the top of the new branch
-	_delete_prealloc(ctxt, node);
+revert:
+	// allocation failed after unbalancing some balanced nodes along the branch
+	for (parent = node; node; parent = node)
+	{
+		ASSERT(parent->balance == 1 || parent->balance == -1);
+		if (parent->balance == 1)
+			node = parent->right;
+		else
+			node = parent->left;
+
+		parent->balance = 0;
+	}
 
 	return NULL;
 };
@@ -647,7 +696,7 @@ int avlrcu_insert(struct avlrcu_root *root, struct avlrcu_node *node)
 	avlrcu_ctxt_init(&ctxt, root);
 
 	/* retrace generates the preallocated branch */
-	prealloc = prealloc_retrace(&ctxt, node);
+	prealloc = insert_retrace(&ctxt, node);
 	if (!prealloc)
 		return -ENOMEM;
 
