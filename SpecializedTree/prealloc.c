@@ -229,6 +229,9 @@ struct avlrcu_node *prealloc_replace(struct avlrcu_ctxt *ctxt, struct avlrcu_nod
 	struct avlrcu_ops *ops = ctxt->root->ops;
 	struct avlrcu_node *prealloc;
 
+	/* helps count allocations in performance measurements */
+	pr_debug("%s: node "NODE_FMT"\n", __func__, NODE_ARG(target));
+
 	ASSERT(!is_new_branch(target));
 
 	/* start by allocating a node that replaces target */
@@ -295,8 +298,8 @@ struct avlrcu_node *prealloc_child(struct avlrcu_ctxt *ctxt, struct avlrcu_node 
 	ASSERT(is_new_branch(parent));
 	ASSERT(child);
 
-	/* since rebalancing poorly balanced branches,
-	* some nodes may get new branch children during unwind */
+	/* since conditioning poorly balanced branches,
+	 * some nodes may get new branch children during unwind */
 	if (is_new_branch(child))
 		return child;
 
@@ -333,6 +336,9 @@ static struct avlrcu_node *prealloc_retrace_ror(struct avlrcu_node *target)
 	struct avlrcu_node *t2 = pivot->right;
 	struct avlrcu_node *new_root = pivot;
 	struct avlrcu_node *new_pivot = target;
+
+	/* helps count rotations in performance measurements */
+	pr_debug("%s: root "NODE_FMT"\n", __func__, NODE_ARG(target));
 
 	ASSERT(is_new_branch(target));
 	ASSERT(is_new_branch(pivot));
@@ -371,6 +377,9 @@ static struct avlrcu_node *prealloc_retrace_rlr(struct avlrcu_node *target)
 	struct avlrcu_node *new_root = right;		// new Y
 	struct avlrcu_node *new_left = left;		// new Z
 	struct avlrcu_node *new_right = target;		// new X
+
+	/* helps count rotations (2) in performance measurements */
+	pr_debug("%s: root "NODE_FMT"\n", __func__, NODE_ARG(target));
 
 	ASSERT(is_new_branch(target));
 	ASSERT(is_new_branch(left));
@@ -419,6 +428,9 @@ static struct avlrcu_node *prealloc_retrace_rol(struct avlrcu_node *target)
 	struct avlrcu_node *new_root = pivot;
 	struct avlrcu_node *new_pivot = target;
 
+	/* helps count rotations in performance measurements */
+	pr_debug("%s: root "NODE_FMT"\n", __func__, NODE_ARG(target));
+
 	ASSERT(is_new_branch(target));
 	ASSERT(is_new_branch(pivot));
 
@@ -456,6 +468,9 @@ static struct avlrcu_node *prealloc_retrace_rrl(struct avlrcu_node *target)
 	struct avlrcu_node *new_root = left;		// new Y
 	struct avlrcu_node *new_left = target;		// new X
 	struct avlrcu_node *new_right = right;		// new Z
+
+	/* helps count rotations (2) in performance measurements */
+	pr_debug("%s: root "NODE_FMT"\n", __func__, NODE_ARG(target));
 
 	ASSERT(is_new_branch(target));
 	ASSERT(is_new_branch(right));
@@ -776,6 +791,9 @@ struct avlrcu_node *prealloc_rol(struct avlrcu_ctxt *ctxt, struct avlrcu_node *t
 	struct balance_factors new_balance;
 	int diff_height;
 
+	/* helps count rotations in performance measurements */
+	pr_debug("%s: root "NODE_FMT"\n", __func__, NODE_ARG(target));
+
 	ASSERT(is_new_branch(target));
 	ASSERT(is_new_branch(pivot));
 
@@ -825,6 +843,9 @@ struct avlrcu_node *prealloc_ror(struct avlrcu_ctxt *ctxt, struct avlrcu_node *t
 	struct avlrcu_node *new_pivot = target;
 	struct balance_factors new_balance;
 	int diff_height;
+
+	/* helps count rotations in performance measurements */
+	pr_debug("%s: root "NODE_FMT"\n", __func__, NODE_ARG(target));
 
 	ASSERT(is_new_branch(target));
 	ASSERT(is_new_branch(pivot));
