@@ -511,7 +511,25 @@ static struct avlrcu_node *prealloc_retrace_rrl(struct avlrcu_node *target)
 	return new_root;
 }
 
-/* retrace for insert */
+/*
+ * prealloc_retrace() - retrace for insert
+ * @ctxt	AVL operations environment
+ * @node	newly inserted node that starts the preallocated branch
+ *
+ * The classic retrace on insert algorithm.
+ * Runs as long as there is an increase in height present.
+ * The height diff is encoded in the control flow.
+ * Stops when the height diff has been absorbed by a balancing or rotation.
+ *
+ * Returns the top of the preallocated branch on success or NULL on error.
+ * The only possible error case is memory allocation failure.
+ *
+ * TODO: there are cases in insertion (in a well balanced tree) where nodes are replaced...
+ *	 ... only to have their balance factor modified (else branch, parent is balanced)
+ * TODO: no rotations are really done
+ * TODO: an optimization is possible where the balance factors can be replaced on the old nodes...
+ *	 ... then the new branch can catch up & replace the nodes if a rotation is needed
+ */
 static struct avlrcu_node *prealloc_retrace(struct avlrcu_ctxt *ctxt, struct avlrcu_node *node)
 {
 	struct avlrcu_node *parent;
