@@ -248,12 +248,46 @@ struct avlrcu_node *prealloc_replace(struct avlrcu_ctxt *ctxt, struct avlrcu_nod
 }
 
 /*
+ * prealloc_link_left() - connect parent & child on the new branch
+ * @parent - parent on the new branch
+ * @child - child on the new branch
+ *
+ * Helper for unctions establishing the new branch structure.
+ */
+static void prealloc_link_left(struct avlrcu_node *parent, struct avlrcu_node *child)
+{
+	ASSERT(is_new_branch(parent));
+	ASSERT(is_new_branch(child));
+
+	parent->left = child;
+	child->parent = make_left(parent);
+}
+
+/*
+ * prealloc_link_left() - connect parent & child on the new branch
+ * @parent - parent on the new branch
+ * @child - child on the new branch
+ *
+ * Helper for unctions establishing the new branch structure.
+ */
+static void prealloc_link_right(struct avlrcu_node *parent, struct avlrcu_node *child)
+{
+	ASSERT(is_new_branch(parent));
+	ASSERT(is_new_branch(child));
+
+	parent->right = child;
+	child->parent = make_right(parent);
+}
+
+/*
  * prealloc_parent() - brings a parent to the new branch
  * @ctxt - AVL operation environment
  * @child - child already on the new branch
  *
  * Brings a parent to the new branch (one of the children is already on the new branch).
  * Useful for retrace where the algorithm ascends.
+ *
+ * Returns the new parent (top of the new branch) or NULL on error.
  */
 struct avlrcu_node *prealloc_parent(struct avlrcu_ctxt *ctxt, struct avlrcu_node *child)
 {
@@ -269,14 +303,10 @@ struct avlrcu_node *prealloc_parent(struct avlrcu_ctxt *ctxt, struct avlrcu_node
 		return NULL;
 
 	/* link on the new branch */
-	if (is_left_child(child->parent)) {
-		new_parent->left = child;
-		child->parent = make_left(new_parent);
-	}
-	else {
-		new_parent->right = child;
-		child->parent = make_right(new_parent);
-	}
+	if (is_left_child(child->parent))
+		prealloc_link_left(new_parent, child);
+	else
+		prealloc_link_right(new_parent, child);
 
 	return new_parent;
 }
@@ -289,6 +319,8 @@ struct avlrcu_node *prealloc_parent(struct avlrcu_ctxt *ctxt, struct avlrcu_node
  *
  * Only useful for unwind, cause it descents and must find a way down.
  * The parent needs to be part of the new branch (the child points to old parent).
+ *
+ * Returns the new child (bottom of the new branch) or NULL on error.
  */
 struct avlrcu_node *prealloc_child(struct avlrcu_ctxt *ctxt, struct avlrcu_node *parent, int which)
 {
@@ -309,14 +341,11 @@ struct avlrcu_node *prealloc_child(struct avlrcu_ctxt *ctxt, struct avlrcu_node 
 		return NULL;
 
 	/* link on the new branch */
-	if (which == LEFT_CHILD) {
-		parent->left = new_child;
-		new_child->parent = make_left(parent);
-	}
-	else {
-		parent->right = new_child;
-		new_child->parent = make_right(parent);
-	}
+	if (which == LEFT_CHILD)
+		prealloc_link_left(parent, new_child);
+	else
+		prealloc_link_right(parent, new_child);
+
 
 	return new_child;
 }
@@ -512,42 +541,121 @@ static struct avlrcu_node *prealloc_retrace_rrl(struct avlrcu_node *target)
 }
 
 /*
- * retrace_catch_up() - allocate new branch parent by parent
+ * retrace_prepare_rotation() - allocate new branch for insert retrace
  * @ctxt	AVL operations environment
- * @node	node starting the preallocated branch
- * @last	last parent to be replaced by new node
+ * @initial	initial node starting the preallocated branch
+ * @parent	parent that needs rotation
  *
- * There are cases in insertion (in a well balanced tree) where nodes are replaced
- * only to have their balance factor modified. No rotations are really done.
- * An optimization is possible where the balance factors can be replaced on the old nodes,
- * then the new branch can catch up & replace the nodes if a rotation is needed.
+ * A rotation (the only one) on the parent is needed for insert retrace.
+ * The parent and its first pivot are both on the old branch (the tree).
+ * If the rotation is a double rotation, the 2nd pivot may be the new node.
+ * Neither the parent nor the pivot are balanced. Detect the case.
+ * New nodes are allocated for the rotation(s) and connected with the
+ * initial new node if possible.
  *
  * Returns the top of the preallocated branch on success or NULL on error.
  * The only possible error case is memory allocation failure.
+ * Removes all the allocated nodes in case of failure (including the new node).
  */
-static struct avlrcu_node *retrace_catch_up(struct avlrcu_ctxt *ctxt, struct avlrcu_node *node, struct avlrcu_node *last)
+static struct avlrcu_node *retrace_prepare_rotation(struct avlrcu_ctxt *ctxt, struct avlrcu_node *initial, struct avlrcu_node *parent)
 {
-	struct avlrcu_node *parent;
-	struct avlrcu_node *new_parent;
+	struct avlrcu_node *pivot1, *new_pivot1;
+	struct avlrcu_node *pivot2, *new_pivot2;
 
-	ASSERT(is_new_branch(node));
-	ASSERT(!is_new_branch(last));
+	ASSERT(is_new_branch(initial));
+	ASSERT(!is_new_branch(parent));
+	ASSERT(parent->balance != 0);
 
-	do {
-		parent = get_parent(node);
-		ASSERT(!is_root(parent));
+	parent = prealloc_replace(ctxt, parent);
+	if (!parent)
+		goto error_initial;
 
-		new_parent = prealloc_parent(ctxt, node);
-		if (unlikely(!new_parent))
+	/* detect the type of rotation needed by the combination of balances */
+	if (parent->balance < 0) {
+		pivot1 = parent->left;
+		ASSERT(!is_new_branch(pivot1));
+		ASSERT(pivot1->balance != 0);
+
+		new_pivot1 = prealloc_child(ctxt, parent, LEFT_CHILD);
+		if (!new_pivot1)
 			goto error;
 
-		node = new_parent;
-	} while (parent != last);
+		/* rlr */
+		if (new_pivot1->balance > 0) {
+			/* the 2nd pivot may be the initial node itself */
+			if (get_parent(initial) == pivot1)
+				prealloc_link_right(new_pivot1, initial);
+			else {
+				pivot2 = new_pivot1->right;
+				ASSERT(!is_new_branch(pivot2));
+				ASSERT(pivot2->balance != 0);
 
-	return node;
+				new_pivot2 = prealloc_child(ctxt, new_pivot1, RIGHT_CHILD);
+				if (!new_pivot2)
+					goto error;
+
+				/* attempt to connect the initial node to the 2nd pivot */
+				if (get_parent(initial) == pivot2) {
+					if (is_left_child(initial->parent))
+						prealloc_link_left(new_pivot2, initial);
+					else
+						prealloc_link_right(new_pivot2, initial);
+				}
+			}
+		}
+		/* ror */
+		else {
+			/* attempt to connect the initial node to the first pivot */
+			if (get_parent(initial) == pivot1)
+				prealloc_link_left(new_pivot1, initial);
+		}
+	}
+	else {
+		pivot1 = parent->right;
+		ASSERT(!is_new_branch(pivot1));
+		ASSERT(pivot1->balance != 0);
+
+		new_pivot1 = prealloc_child(ctxt, parent, RIGHT_CHILD);
+		if (!new_pivot1)
+			goto error;
+
+		/* rrl */
+		if (new_pivot1->balance < 0) {
+			/* the 2nd pivot may be the initial node itself */
+			if (get_parent(initial) == pivot1)
+				prealloc_link_left(new_pivot1, initial);
+			else {
+				pivot2 = new_pivot1->left;
+				ASSERT(!is_new_branch(pivot2));
+				ASSERT(pivot2->balance != 0);
+
+				new_pivot2 = prealloc_child(ctxt, new_pivot1, LEFT_CHILD);
+				if (!new_pivot2)
+					goto error;
+
+				/* attempt to connect the initial node to the 2nd pivot */
+				if (get_parent(initial) == pivot2) {
+					if (is_left_child(initial->parent))
+						prealloc_link_left(new_pivot2, initial);
+					else
+						prealloc_link_right(new_pivot2, initial);
+				}
+			}
+		}
+		/* rol */
+		else {
+			/* attempt to connect the initial node to the first pivot */
+			if (get_parent(initial) == pivot1)
+				prealloc_link_right(new_pivot1, initial);
+		}
+	}
+
+	return parent;
 
 error:
-	_delete_prealloc(ctxt, node);
+	_delete_prealloc(ctxt, parent);		// the top of the new branch
+error_initial:
+	_delete_prealloc(ctxt, initial);	// the initial new node
 
 	return NULL;
 }
@@ -571,12 +679,13 @@ static struct avlrcu_node *insert_retrace(struct avlrcu_ctxt *ctxt, struct avlrc
 
 	ASSERT(is_new_branch(prealloc));
 
+	/* iterate over the node-parent pair, starting at the new node */
 	for (node = prealloc, parent = get_parent(node); !is_root(parent); node = parent, parent = get_parent(node)) {
 		if (is_left_child(node->parent)) {
-			// parent is left-heavy
+			// parent is left-heavy (this won't happen in the first iteration)
 			if (parent->balance < 0) {
 				// rotation is needed
-				parent = retrace_catch_up(ctxt, prealloc, parent);
+				parent = retrace_prepare_rotation(ctxt, prealloc, parent);
 				if (unlikely(!parent))
 					goto revert;
 
@@ -595,16 +704,15 @@ static struct avlrcu_node *insert_retrace(struct avlrcu_ctxt *ctxt, struct avlrc
 				return prealloc;
 			}
 			// parent is balanced
-			else {
+			else
 				parent->balance = -1;			/* parent becomes left-heavy */
-			}
 		}
 		// is right child
 		else {
-			// parent is right heavy
+			// parent is right heavy (this won't happen in the first iteration)
 			if (parent->balance > 0) {
 				// rotation is needed
-				parent = retrace_catch_up(ctxt, prealloc, parent);
+				parent = retrace_prepare_rotation(ctxt, prealloc, parent);
 				if (unlikely(!parent))
 					goto revert;
 
@@ -623,9 +731,8 @@ static struct avlrcu_node *insert_retrace(struct avlrcu_ctxt *ctxt, struct avlrc
 				return prealloc;
 			}
 			// parent is balanced
-			else {
+			else
 				parent->balance = 1;			/* parent becomes right-heavy */
-			}
 		}
 	}
 
@@ -700,9 +807,25 @@ int avlrcu_insert(struct avlrcu_root *root, struct avlrcu_node *node)
 	if (!prealloc)
 		return -ENOMEM;
 
-	prealloc_connect(root, prealloc);
+	/*
+	 * the new node & the preallocated branch are already connected
+	 * if the new node's parent is on the new branch
+	 * (reuse the parent variable, new node's parent may have changed)
+	 * in this case the new branch can be connected at once
+	 * otherwise they will have to be connected as a forest
+	 */
+	parent = get_parent(node);
+	if (is_root(parent) || !is_new_branch(parent))
+		prealloc_connect(root, node);
 
-	// this will remove the replaced nodes
+	/*
+	 * the top of the preallocated branch may be the node itself
+	 * if no rotation was necessary during retrace
+	 */
+	if (prealloc != node)
+		prealloc_connect(root, prealloc);
+
+	/* nodes are replaced only in the retrace step */
 	if (!llist_empty(&ctxt.old))
 		prealloc_remove_old(&ctxt);
 
@@ -1373,9 +1496,6 @@ static struct avlrcu_node *prealloc_fix(struct avlrcu_ctxt *ctxt, struct avlrcu_
 				node = prealloc_rrl(ctxt, node);
 			break;
 		}
-		// TODO: this looks like the delete_retrace() algorithm without the allocations
-		// TODO: because we are working on the preallocated branch
-		// TODO: maybe these functions can be merged ?
 
 		parent = get_parent(node);
 	} while (!is_root(parent) && is_new_branch(parent));
