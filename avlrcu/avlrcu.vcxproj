@@ -37,7 +37,7 @@
   <PropertyGroup Label="Globals">
     <ProjectGuid>{ddaabf9c-3e48-4778-a9eb-019cdb57b644}</ProjectGuid>
     <Keyword>Linux</Keyword>
-    <RootNamespace>SpecializedTree</RootNamespace>
+    <RootNamespace>avlrcu</RootNamespace>
     <MinimumVisualStudioVersion>15.0</MinimumVisualStudioVersion>
     <ApplicationType>Linux</ApplicationType>
     <ApplicationTypeRevision>1.0</ApplicationTypeRevision>
@@ -87,8 +87,8 @@
     <RemoteBuildOutputs>avlrcu.ko</RemoteBuildOutputs>
     <RemoteCleanCommandLine>make clean</RemoteCleanCommandLine>
     <RemoteReBuildCommandLine>make</RemoteReBuildCommandLine>
-    <NMakeIncludeSearchPath>D:\kernel\kernel\kernel\arch\x86\include;D:\kernel\kernel\build\arch\x86\include\generated;D:\kernel\kernel\kernel\include;D:\kernel\kernel\build\include;D:\kernel\kernel\kernel\arch\x86\include\uapi;D:\kernel\kernel\build\arch\x86\include\generated\uapi;D:\kernel\kernel\kernel\include\uapi;D:\kernel\kernel\build\include\generated\uapi;D:\kernel\kernel\kernel\tools\lib;D:\kernel\kernel\build\bpf;D:\kernel\kernel\kernel\tools\testing\selftests\bpf</NMakeIncludeSearchPath>
-    <NMakeForcedIncludes>D:\kernel\kernel\build\override.h;D:\kernel\kernel\kernel\include\linux\kconfig.h;D:\kernel\kernel\kernel\include\linux\compiler_types.h</NMakeForcedIncludes>
+    <NMakeIncludeSearchPath>D:\linux\linux\arch\x86\include;D:\linux\build\arch\x86\include\generated;D:\linux\linux\include;D:\linux\build\include;D:\linux\linux\arch\x86\include\uapi;D:\linux\build\arch\x86\include\generated\uapi;D:\linux\linux\include\uapi;D:\linux\build\include\generated\uapi;D:\linux\linux\tools\lib;D:\linux\\build\bpf;D:\linux\linux\tools\testing\selftests\bpf</NMakeIncludeSearchPath>
+    <NMakeForcedIncludes>D:\linux\build\override.h;D:\linux\linux\include\linux\kconfig.h;D:\linux\linux\include\linux\compiler_types.h</NMakeForcedIncludes>
     <NMakePreprocessorDefinitions>__KERNEL__;KBUILD_MODNAME="";AVLRCU_DEBUG</NMakePreprocessorDefinitions>
   </PropertyGroup>
   <ItemGroup>
@@ -103,6 +103,9 @@
     <ClInclude Include="internal.h" />
     <ClInclude Include="test.h" />
     <ClInclude Include="tree.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="README" />
   </ItemGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <PreBuildEvent>

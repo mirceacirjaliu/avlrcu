@@ -1,0 +1,64 @@
+INSTALL:
+1. clone this repository
+2. cd avlrcu
+3. make
+4. insmod avlrcu.ko
+
+RUN:
+The test code keeps an in-memory tree accessible through this interface.
+
+root@ubuntu:~# ll /sys/kernel/debug/avlrcu/
+total 0
+drwxr-xr-x  2 root root 0 sep  1 19:43 ./
+drwx------ 45 root root 0 sep  1 15:37 ../
+--w--w--w-  1 root root 0 sep  1 19:43 clear
+--w--w--w-  1 root root 0 sep  1 19:43 delete
+-r--r--r--  1 root root 0 sep  1 19:43 dump_gv
+-r--r--r--  1 root root 0 sep  1 19:43 dump_po
+-rw-rw-rw-  1 root root 0 sep  1 19:43 find
+--w--w--w-  1 root root 0 sep  1 19:43 insert
+--w--w--w-  1 root root 0 sep  1 19:43 rlr
+--w--w--w-  1 root root 0 sep  1 19:43 rol
+--w--w--w-  1 root root 0 sep  1 19:43 ror
+--w--w--w-  1 root root 0 sep  1 19:43 rrl
+--w--w--w-  1 root root 0 sep  1 19:43 unwind
+
+clear - clear the tree
+echo anything > /sys/kernel/debug/avlrcu/clear
+
+insert - insert a node with a certain value
+echo 1234 > /sys/kernel/debug/avlrcu/insert
+
+find - find a value or a range of values
+
+# iterate all values (in-order dump)
+echo > /sys/kernel/debug/avlrcu/find
+cat /sys/kernel/debug/avlrcu/find
+
+# find a single value
+echo 1234 > /sys/kernel/debug/avlrcu/find
+cat /sys/kernel/debug/avlrcu/find
+
+# find a range of values
+echo 1234 - 5678 > /sys/kernel/debug/avlrcu/find
+cat /sys/kernel/debug/avlrcu/find
+
+rlr, rrl, rol, rol - test rotations on a node with a certain value
+# the rotations are allowed to break AVL invariants
+echo 1234 - /sys/kernel/debug/avlrcu/rol
+echo 5678 - /sys/kernel/debug/avlrcu/rrl
+
+unwind - test unwind on a node with a certain value
+# AVL invariants must hold
+echo 1234 - /sys/kernel/debug/avlrcu/unwind
+
+delete - delete a node with a certain value
+# AVL invariants must hold
+echo 1234 - /sys/kernel/debug/avlrcu/delete
+
+dump_po - post-order dump
+cat /sys/kernel/debug/avlrcu/dump_po
+
+dump_gv - in-order dump in DOT language
+cat /sys/kernel/debug/avlrcu/dump_gv > tree.gv
+dot -Tpng tree.gv -o tree.png
