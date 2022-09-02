@@ -62,3 +62,48 @@ cat /sys/kernel/debug/avlrcu/dump_po
 dump_gv - in-order dump in DOT language
 cat /sys/kernel/debug/avlrcu/dump_gv > tree.gv
 dot -Tpng tree.gv -o tree.png
+
+SAMPLE:
+echo 6fa2000 > /sys/kernel/debug/avlrcu/insert
+echo 7df000 > /sys/kernel/debug/avlrcu/insert
+echo 6b26000 > /sys/kernel/debug/avlrcu/insert
+echo 1ee4000 > /sys/kernel/debug/avlrcu/insert
+echo 3f58000 > /sys/kernel/debug/avlrcu/insert
+echo 5e8a000 > /sys/kernel/debug/avlrcu/insert
+echo 4801000 > /sys/kernel/debug/avlrcu/insert
+echo 3be5000 > /sys/kernel/debug/avlrcu/insert
+echo 6fc3000 > /sys/kernel/debug/avlrcu/insert
+echo 1321000 > /sys/kernel/debug/avlrcu/insert
+echo 680f000 > /sys/kernel/debug/avlrcu/insert
+echo 6515000 > /sys/kernel/debug/avlrcu/insert
+echo 28d000 > /sys/kernel/debug/avlrcu/insert
+echo 8e2000 > /sys/kernel/debug/avlrcu/insert
+echo 55dc000 > /sys/kernel/debug/avlrcu/insert
+echo 5efd000 > /sys/kernel/debug/avlrcu/insert
+echo 4263000 > /sys/kernel/debug/avlrcu/insert
+echo 2b02000 > /sys/kernel/debug/avlrcu/insert
+echo 4b47000 > /sys/kernel/debug/avlrcu/insert
+echo 4720000 > /sys/kernel/debug/avlrcu/insert
+echo 2b50000 > /sys/kernel/debug/avlrcu/insert
+echo 17e9000 > /sys/kernel/debug/avlrcu/insert
+echo 5cdb000 > /sys/kernel/debug/avlrcu/insert
+echo 6746000 > /sys/kernel/debug/avlrcu/insert
+echo 29d4000 > /sys/kernel/debug/avlrcu/insert
+echo 3d36000 > /sys/kernel/debug/avlrcu/insert
+echo 53b4000 > /sys/kernel/debug/avlrcu/insert
+echo 4f42000 > /sys/kernel/debug/avlrcu/insert
+echo 2be5000 > /sys/kernel/debug/avlrcu/insert
+echo 5b5b000 > /sys/kernel/debug/avlrcu/insert
+echo 43dc000 > /sys/kernel/debug/avlrcu/insert
+echo 508d000 > /sys/kernel/debug/avlrcu/insert
+echo 615d000 > /sys/kernel/debug/avlrcu/insert
+echo 2bfc000 > /sys/kernel/debug/avlrcu/insert
+echo 3444000 > /sys/kernel/debug/avlrcu/insert
+echo 7611000 > /sys/kernel/debug/avlrcu/insert
+echo 76a2000 > /sys/kernel/debug/avlrcu/insert
+echo 31da000 > /sys/kernel/debug/avlrcu/insert
+
+echo 8e2000 > /sys/kernel/debug/avlrcu/delete
+
+cat /sys/kernel/debug/avlrcu/dump_gv > tree.gv
+dot -Tpng tree.gv -o tree.png
